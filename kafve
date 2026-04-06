@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+
+# MAIN
+init_conf() {
+  local kafve_config_file="./config/kafve.conf"
+
+  if [ -f "$kafve_config_file" ]; then
+      set -a
+        # shellcheck disable=SC1090
+        source "$kafve_config_file"
+      set +a
+
+      echo "-- $KAFVE_NAME v$KAFVE_VERSION ($KAFVE_ENVIRONMENT) --"
+  else
+      echo "[ERROR] No se encontró el archivo 'kafve.conf'."
+      exit 1
+  fi
+}
+
+main() {
+    if [ -z "$1" ]; then
+        print_help
+    fi
+
+    case "$1" in
+        "help"|"-h"|"--help")
+            print_help
+            ;;
+        "install")
+            ./scripts/kafve-install
+            ;;
+        "uninstall")
+            ./scripts/kafve-uninstall
+            ;;
+        "broker")
+            shift
+            ./scripts/kafve-broker "$@"
+            ;;
+        "producer")
+        	shift
+        	./scripts/kafve-producer "$@"
+        	;;
+     	"consumer")
+     		shift
+     		./scripts/kafve-consumer "$@"
+     		;;
+        *)
+            print_help
+            ;;
+    esac
+}
+
+print_help() {
+    echo '
+Uso:
+    ./kafve <comando> [acción] [opciones]
+
+Comandos Principales:
+    help, -h, --help    Muestra esta ayuda.
+    install             Instala el proyecto (vía kafve-install).
+    clean               Limpia el entorno (vía kafve-uninstall).
+
+Broker (Gestión del nodo Kafka):
+    Uso: ./kafve broker <acción> [opciones]
+
+    Acciones:
+        init [-f]       Inicializa el almacenamiento y genera el Cluster ID (KRaft).
+        start           Levanta el broker en modo daemon (fondo).
+        stop            Detiene el proceso de forma segura (Graceful shutdown).
+        status          Muestra una tabla con los procesos y PIDs activos.
+        info            Muestra los logs del servidor en tiempo real (tail -f).
+
+    Descripción de Acciones:
+        init    Prepara los directorios de datos. Si no se especifica el ID,
+                genera uno aleatorio. Requiere "server.properties".
+        start   Inicia el proceso. Si detecta que no hay metadatos de KRaft,
+                ejecuta un "init" automático antes de arrancar.
+        stop    Envía una señal SIGTERM. Si el proceso no responde tras 3s,
+                escala a una parada forzada para evitar procesos zombis.
+
+    Opciones:
+        -f, --force     En "init": Borra el directorio definido en "log.dirs"
+                        y reformatea el cluster desde cero (Peligro: Borra datos).
+
+    Ejemplos:
+        ./kafve broker init --force
+        ./kafve broker status
+
+Producer (Gestión de publicación de mensajes):
+    Uso: ./kafve producer <acción> [opciones]
+
+    Acciones:
+        send <-t tópico> [-k llave] [-m mensaje | -f archivo]
+        #NO IMPLEMENTADO# test <-t tópico>
+
+    Descripción de Acciones:
+        send    Publica un registro en Kafka. Requiere obligatoriamente un tópico
+                y contenido (mensaje directo o vía archivo).
+        test    Envía un mensaje sintético (UUID) para validar que la conexión,
+                permisos SSL y el broker de KRaft están operativos.
+
+    Opciones:
+        -t, --topic     Nombre del tópico destino (Obligatorio).
+        -m, --message   Cuerpo del mensaje en texto plano.
+        -f, --file      Ruta a un archivo (se envía como un único mensaje).
+        -k, --key       Llave del mensaje (Opcional, defecto: K-RANDOM).
+
+    Ejemplos:
+        ./kafve producer send -t ventas -m "Orden #123"
+        ./kafve producer test -t conectividad
+
+Consumer (Gestión de consumo de mensajes):
+    Uso: ./kafve consumer <acción> [opciones]
+
+    Acciones:
+        start <-t tópico>    Inicia un consumidor para un tópico específico.
+        stop <-t tópico>     Detiene un consumidor para un tópico específico.
+        info <-t tópico>     Muestra los logs del consumidor en tiempo real.
+        status               Lista todos los consumidores activos.
+
+    Descripción de Acciones:
+        start   Inicializa un consumidor en segundo plano para el tópico indicado.
+                Crea logs en log/consumer-<tópico>.log y verifica que arranque correctamente.
+        stop    Detiene el consumidor del tópico especificado, eliminando logs residuales.
+        info    Abre un visor en tiempo real de los logs del consumidor (tail -f).
+        status  Muestra una tabla con PID, tópico, tiempo y URL del broker de consumidores activos.
+
+    Opciones:
+        -t, --topic     Nombre del tópico (Obligatorio para start, stop e info).
+
+    Ejemplos:
+        ./kafve consumer start -t Example
+        ./kafve consumer stop -t Example
+        ./kafve consumer info -t Example
+        ./kafve consumer status
+
+
+Configuración:
+    Requiere un archivo "kafve.conf" en el directorio ./config.
+'
+  exit 0
+}
+
+# MAIN RUN
+echo "[WARN] Este proyecto está configurado ÚNICAMENTE para DESARROLLO.
+[WARN] Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad."
+init_conf
+main "$@"

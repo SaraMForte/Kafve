@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+
+# MAIN
+main_producer() {
+	local command=""
+	local key="K-$RANDOM$RANDOM"
+	local topic="SOMETHING"
+	local file_rute=""
+	local message=""
+
+	# Procesado de argumentos
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			send)
+                command="send"
+                shift
+                ;;
+			-t|--topic)
+				topic="$2"
+				shift 2
+				;;
+            -k|--key)
+            	key="$2"
+            	shift 2
+            	;;
+			-m|--message)
+				message="$2"
+				shift 2
+				;;
+			-f|--file)
+				file_rute="$2"
+				shift 2
+				;;
+			*)
+				echo "[SKIP] ./kafve producer <comando> [argumentos]"
+				return 0
+				;;
+		esac
+    done
+
+	# Delegación de comandos
+    case "$command" in
+        "send")
+            producer_send "$topic" "$key" "$message" "$file_rute"
+            ;;
+        *)
+        	return 1
+        	;;
+    esac
+}
+
+producer_send() {
+	echo "[RUN] Procesando envío."
+	local topic="$1"
+	local key="$2"
+	local message="$3"
+	local file_rute="$4"
+
+	# Comprobación de que habrá algo en el payload
+    if [[ -z $message && -z $file_rute ]]; then
+    	echo "[ERROR] El payload no debe estar vacío"
+    	exit 1
+    fi
+
+	# Comprueba que el tópico existe
+    if check_topic_exists "$KAFVE_BROKER_URL" "$topic"; then
+        echo " -[OK] El tópico '$topic' ya existe en el servidor."
+    else
+        if create_topic "$KAFVE_BROKER_URL" "$topic"; then
+            echo " -[SUCCESS] Tópico '$topic' creado correctamente en $KAFVE_BROKER_URL."
+        else
+            echo "[ERROR] Falló la creación del tópico '$topic'."
+            exit 1
+        fi
+    fi
+
+	# Mandar mensaje a partir de un archivo (json, xml, csv...)
+	if [[ -n $file_rute ]]; then
+		if [[ ! -f $file_rute ]]; then
+			echo "[ERROR] No se ha podido leer el archivo: $file_rute"
+			exit 0
+		fi
+
+		local read_file
+        read_file=$(tr -d '\n\r\t' < "$file_rute")
+		if send_message "$topic" "$key" "$read_file"; then
+           echo "[DONE] Mensaje entregado correctamente (Key: '$key')."
+           exit 0
+        else
+           echo "[ERROR] Error de red o broker: No se pudo entregar el mensaje en '$topic'."
+           exit 1
+        fi
+	fi
+
+	#Mandar mensaje
+	if [[ -n $message ]]; then
+		echo " -[SENDING] Enviando mensaje al tópico '$topic'..."
+
+		if send_message "$topic" "$key" "$message"; then
+		   echo "[DONE] Mensaje entregado correctamente (Key: '$key')."
+		   exit 0
+		else
+		   echo "[ERROR] Error de red o broker: No se pudo entregar el mensaje en '$topic'."
+		   exit 1
+		fi
+	fi
+}
+
+check_topic_exists() {
+    local broker="$1"
+    local topic="$2"
+
+    "${KAFVE_KAFKA_DIR}/bin/kafka-topics.sh" \
+        --bootstrap-server "$broker" \
+        --command-config "$KAFVE_KAFKA_PRODUCER_CONFIG" \
+        --describe \
+        --topic "$topic" || return 1
+}
+
+create_topic() {
+    local topic="$2"
+
+    echo " -[WARN] El tópico '$topic' no existe. Intentando crear..."
+    "${KAFVE_KAFKA_DIR}/bin/kafka-topics.sh" --create \
+        --bootstrap-server "$KAFVE_BROKER_URL" \
+        --command-config "$KAFVE_KAFKA_PRODUCER_CONFIG" \
+        --topic "$topic" \
+        --partitions 1 \
+        --replication-factor 1 || return 1
+}
+
+send_message() {
+	local topic="$1"
+	local key="$2"
+	local message="$3"
+
+	"${KAFVE_KAFKA_DIR}/bin/kafka-console-producer.sh" \
+    	--topic "$topic" \
+    	--bootstrap-server "$KAFVE_BROKER_URL" \
+    	--producer.config "$KAFVE_KAFKA_PRODUCER_CONFIG" \
+    	--reader-property "parse.key=true" \
+        --reader-property "key.separator=:" \
+        --producer-property acks=all \
+    	<<< "$key:$message" || return 1
+}
+
+# MAIN RUN
+main_producer "$@"

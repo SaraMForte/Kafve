@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+readonly CERTIFICATE_RUTE="./config/cert"
+readonly PASSWORD="dummydummy"
+readonly VALIDITY_DAYS=36500
+readonly DNAME="CN=localhost, OU=dummy, O=dummy, L=City, S=State, C=ES"
+
+mkdir -p "$CERTIFICATE_RUTE"
+
+# 1. Generar CA Raíz
+echo "Generando CA Raíz..."
+openssl req -new -x509 -days $VALIDITY_DAYS -passout pass:$PASSWORD \
+    -keyout "$CERTIFICATE_RUTE/ca-key" -out "$CERTIFICATE_RUTE/ca-cert" -subj "/CN=MyRootCA"
+
+# 2. Generar Keystore del Broker
+echo "Generando Keystore..."
+keytool -genkey -keystore "$CERTIFICATE_RUTE/kafka.broker.keystore.jks" \
+    -alias localhost -validity $VALIDITY_DAYS -keyalg RSA \
+    -dname "$DNAME" -storepass $PASSWORD -keypass $PASSWORD
+
+# 3. Crear una solicitud de firma (CSR) desde el Keystore
+echo "Creando solicitud de firma (CSR)..."
+keytool -keystore "$CERTIFICATE_RUTE/kafka.broker.keystore.jks" -alias localhost \
+    -certreq -file "$CERTIFICATE_RUTE/cert-file-sw" -storepass $PASSWORD
+
+# 4. Firmar el certificado del Broker con nuestra CA Raíz
+echo "Firmando el certificado con la CA..."
+openssl x509 -req \
+    -CA "$CERTIFICATE_RUTE/ca-cert" -CAkey "$CERTIFICATE_RUTE/ca-key" \
+    -in "$CERTIFICATE_RUTE/cert-file-sw" -out "$CERTIFICATE_RUTE/cert-signed" \
+    -days $VALIDITY_DAYS \
+    -CAcreateserial -CAserial "$CERTIFICATE_RUTE/ca-cert.srl" \
+    -passin pass:$PASSWORD
+
+# 5. Importar la CA y el certificado firmado de vuelta al Keystore
+echo "Importando CA y certificado firmado al Keystore..."
+keytool -keystore "$CERTIFICATE_RUTE/kafka.broker.keystore.jks" -alias CARoot \
+    -import -file "$CERTIFICATE_RUTE/ca-cert" -storepass $PASSWORD -noprompt
+
+keytool -keystore "$CERTIFICATE_RUTE/kafka.broker.keystore.jks" -alias localhost \
+    -import -file "$CERTIFICATE_RUTE/cert-signed" -storepass $PASSWORD
+
+# 6. Generar Truststore (Para que los clientes confíen en la CA)
+echo "Generando Truststore..."
+keytool -keystore "$CERTIFICATE_RUTE/kafka.broker.truststore.jks" \
+    -alias CARoot -import -file "$CERTIFICATE_RUTE/ca-cert" \
+    -storepass $PASSWORD -noprompt
+
+echo "¡Listo! Ahora la cadena de confianza es completa."

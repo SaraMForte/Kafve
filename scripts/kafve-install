@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+# ERROR CONTROL
+set -e
+
+catch_error() {
+    local archivo=${BASH_SOURCE[1]:-$0}
+
+    echo "[ERROR] Error en $archivo:$1"
+    echo "[ERROR] Comando: '$BASH_COMMAND'"
+
+    rm -rf "opt"
+    exit 1
+}
+
+trap 'catch_error $LINENO' ERR
+
+# MAIN
+echo "[RUN] Iniciando instalación de Kafve..."
+
+# TODO: A priori todos los SO tienen sus carpetas temporales, es posible que exista una forma relativamente cómoda de
+#  obtenerla independientemente del SO.
+mkdir -p "temp"
+echo " -[OK]  Carpeta temporal preparada."
+
+curl -L "$KAFVE_KAFKA_URL" -o "temp/$KAFVE_KAFKA_FILE_NAME.tgz"
+echo " -[OK]  Descarga de Kafka finalizada."
+
+mkdir -p "$KAFVE_KAFKA_DIR"
+echo " -[OK]  Directorio de instalación configurado."
+
+tar -xzf "temp/$KAFVE_KAFKA_FILE_NAME.tgz" -C "$KAFVE_KAFKA_DIR" --strip-components=1
+echo " -[OK]  Archivos extraídos en el destino final -> '$KAFVE_KAFKA_DIR'"
+
+rm -rf "temp"
+echo " -[OK]  Archivos temporales eliminados."
+
+echo "[DONE] Instalacion finalizada en: $(pwd)/$KAFVE_KAFKA_DIR"

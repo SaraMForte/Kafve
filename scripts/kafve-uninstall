@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# VARS
+readonly BLACK_LIST=("$KAFVE_KAFKA_DIR" "temp" "log" ".data")
+
+# MAIN
+run_clean() {
+    echo "[RUN] Iniciando limpieza interna..."
+
+    # TODO: Que pare los consumer y brokers
+
+    for rute in "${BLACK_LIST[@]}"; do
+        if [ -e "$rute" ]; then
+            rm -rf "$rute"
+            echo " -[OK]    '$rute' eliminado con éxito."
+        else
+            echo " -[SKIP]  '$rute' no existe, saltando..."
+        fi
+    done
+
+    echo "[DONE] Limpieza completada."
+}
+
+# MAIN RUN
+run_clean
