@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-# ERROR CONTROL
+################################################################################
+#                                ERROR CONTROL                                 #
+################################################################################
 set -e
 
 catch_error() {
@@ -15,7 +17,9 @@ catch_error() {
 
 trap 'catch_error $LINENO' ERR
 
-# MAIN
+################################################################################
+#                                   MAIN                                      #
+################################################################################
 echo "[RUN] Iniciando instalación de Kafve..."
 
 # TODO: A priori todos los SO tienen sus carpetas temporales, es posible que exista una forma relativamente cómoda de

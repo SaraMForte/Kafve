@@ -20,7 +20,7 @@ main_broker() {
             broker_init $force_flag
             ;;
         "start")
-            broker_start
+            broker_start $force_flag
             ;;
         "stop")
             broker_stop
@@ -47,9 +47,15 @@ broker_init() {
     local cluster_id
     local log_dir
 
+	### Verifica el estado del broker y lo detiene si está activo
+	if assert_broker_running; then
+	    echo " -[INFO] Broker detectado en ejecución. Deteniendo para reinicialización..."
+	    broker_stop
+	fi
+
     ### Busca el directorio de configuración para Kafka
     if [[ ! -f "$KAFVE_KAFKA_CONFIG" ]]; then
-        echo "[Error] No se encuentra el archivo de configuración en $KAFVE_KAFKA_CONFIG"
+        echo "[ERROR] No se encuentra el archivo de configuración en $KAFVE_KAFKA_CONFIG"
         return 1
     fi
 
@@ -63,8 +69,8 @@ broker_init() {
             rm -rf "$log_dir"
             mkdir -p "$log_dir"
         else
-            echo "[Error] El directorio $log_dir ya contiene datos."
-            echo "[Error] Usa --force si quieres borrar el cluster actual y crear uno nuevo."
+            echo "[ERROR] El directorio $log_dir ya contiene datos."
+            echo "[ERROR] Usa --force si quieres borrar el cluster actual y crear uno nuevo."
             return 1
         fi
     fi
@@ -72,7 +78,7 @@ broker_init() {
     ### Generación de Id de Cluster Kafka
     cluster_id=$("$KAFVE_KAFKA_STORAGE_BIN" random-uuid)
     if [[ -z "$cluster_id" ]]; then
-            echo "[Error] No se pudo generar el Cluster ID"
+            echo "[ERROR] No se pudo generar el Cluster ID"
             return 1
     fi
     echo " -[OK]  Cluster ID generado: $cluster_id"
@@ -101,15 +107,19 @@ broker_init_run() {
 # Arranque del broker
 # ------------------------------------------------------------------------------
 broker_start() {
+	local force_flag="$1"
+
     echo "[RUN]  Inicializando Broker..."
 
+	### Comprueba si existe la carpeta para los logs, especificado en el server.properties
     log_dir=$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | cut -d'=' -f2 | tr -d '\r')
-    if [[ ! -d "$log_dir" ]]; then
+    if [[ ! -d "$log_dir" || "$force_flag" == true ]]; then
         broker_init
     fi
 
+	### Comprueba si ya hay un broker inicializado
     if jps | grep -q "Kafka"; then
-      echo "[DONE-SKIP] El Broker ya ha sido inicializado"
+      echo "[DONE-SKIP] El Broker ya había sido inicializado"
       return 0
     fi
 
@@ -129,13 +139,14 @@ broker_start() {
 broker_stop() {
     echo "[RUN] Deteniendo Broker..."
 
-    # Señal de parada oficial del broker
+    ### Señal de parada oficial del broker
     "${KAFVE_KAFKA_DIR}/bin/kafka-server-stop.sh"
     echo " -[TASK] Enviada señal de parada oficial"
 
     echo " -[WAIT] Esperando finalización del proceso de parada del broker"
     sleep 3
-    # Verificación de parada del broker
+
+    ### Verificación de parada del broker
     if jps | grep -q "Kafka"; then
         # Parada forzada del broker
         echo " [FORCE] El proceso no cerró a tiempo, forzando..."
@@ -191,25 +202,25 @@ print_broker_status_row() {
 broker_info() {
     echo "[RUN] Abriendo visor de logs para broker en tiempo real..."
 
-	# Comprueba si existe archivo de log
+	### Comprueba si existe archivo de log
     local log_file="${KAFVE_KAFKA_DIR}/logs/server.log"
     if [[ ! -f "$log_file" ]]; then
         echo "[ERROR] No se encuentra el archivo en: $log_file"
         return 1
     fi
 
-    # Comprueba si existen brokers activos
+    ### Comprueba si existen brokers activos
     assert_broker_running
 
-	# info para salir
+	### info para salir
     echo " -[INFO] Presiona CTRL+C para salir."
     echo "--------------------------------------------------"
 
-    # Entra al visor de logs del broker
+    ### Entra al visor de logs del broker
     trap 'echo -e "\n[DONE] Has salido del visor de logs del broker"; return' INT
     tail -f "$log_file"
 
-    # Limpiamos la trap al salir para no afectar al resto del script
+    ### Limpiamos la trap al salir para no afectar al resto del script
     trap - INT
 }
 

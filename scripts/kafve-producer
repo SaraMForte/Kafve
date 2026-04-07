@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-# MAIN
+################################################################################
+#                                    MAIN                                      #
+################################################################################
 main_producer() {
 	local command=""
 	local key="K-$RANDOM$RANDOM"
@@ -8,7 +10,7 @@ main_producer() {
 	local file_rute=""
 	local message=""
 
-	# Procesado de argumentos
+	### Procesado de argumentos
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			send)
@@ -56,13 +58,13 @@ producer_send() {
 	local message="$3"
 	local file_rute="$4"
 
-	# Comprobación de que habrá algo en el payload
+	### Comprobación de que habrá algo en el payload
     if [[ -z $message && -z $file_rute ]]; then
     	echo "[ERROR] El payload no debe estar vacío"
     	exit 1
     fi
 
-	# Comprueba que el tópico existe
+	### Comprueba que el tópico existe
     if check_topic_exists "$KAFVE_BROKER_URL" "$topic"; then
         echo " -[OK] El tópico '$topic' ya existe en el servidor."
     else
@@ -74,7 +76,7 @@ producer_send() {
         fi
     fi
 
-	# Mandar mensaje a partir de un archivo (json, xml, csv...)
+	### Mandar mensaje a partir de un archivo (json, xml, csv...)
 	if [[ -n $file_rute ]]; then
 		if [[ ! -f $file_rute ]]; then
 			echo "[ERROR] No se ha podido leer el archivo: $file_rute"
@@ -92,7 +94,7 @@ producer_send() {
         fi
 	fi
 
-	#Mandar mensaje
+	### Mandar mensaje
 	if [[ -n $message ]]; then
 		echo " -[SENDING] Enviando mensaje al tópico '$topic'..."
 
@@ -144,5 +146,7 @@ send_message() {
     	<<< "$key:$message" || return 1
 }
 
-# MAIN RUN
+################################################################################
+#                                MAIN RUN                                      #
+################################################################################
 main_producer "$@"

@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 
-# VARS
+################################################################################
+#                                  VARS                                        #
+################################################################################
 readonly KAFKA_CONSUMER_CLASS="org.apache.kafka.tools.consumer.ConsoleConsumer"
 
-# MAIN
+################################################################################
+#                                MAIN RUN                                      #
+################################################################################
 main_consumer() {
 	local command=""
 	local topic="SOMETHING"
 
-	# Procesado de argumentos
+	### Procesado de argumentos
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			start)
@@ -38,7 +42,7 @@ main_consumer() {
 		esac
     done
 
-	# Delegación de comandos
+	### Delegación de comandos
     case "$command" in
         "start")
             consumer_start "$topic"
@@ -65,25 +69,25 @@ consumer_start() {
 
     echo "[RUN] Inicializando consumidor para el tópico: $topic"
 
-	# Comprueba si ya se ha arrancado un consumer en el tópico
+	### Comprueba si ya se ha arrancado un consumer en el tópico
     if is_consumer_running "$topic"; then
     	echo "[ERROR] Ya existe un consumer para el tópico: $topic"
     	exit 0
     fi
 
-	# Comprueba si existe una carpeta de logs, sino la  crea
+	### Comprueba si existe una carpeta de logs, sino la  crea
 	if [[ ! -d "$KAFVE_LOG_DIR" ]]; then
 	   mkdir -p "$KAFVE_LOG_DIR"
 	   echo " -[OK] Carpeta de logs '$KAFVE_LOG_DIR' creada correctamente."
 	fi
 
-	# Comprueba si se ha quedado un consumer.log y hay que borrarlo
+	### Comprueba si se ha quedado un consumer.log y hay que borrarlo
 	if [[ -f "$log_file" ]]; then
 		rm -f "$log_file"
 		echo " -[OK] Borrado archivo residual del anterior consumer del mismo tópico"
 	fi
 
-	# Inicializa el consumer y externaliza la salida a log/consumer.log
+	### Inicializa el consumer y externaliza la salida a log/consumer.log
 	exec -a "kafve_consumer_{$topic}" \
     	"${KAFVE_KAFKA_DIR}/bin/kafka-console-consumer.sh" \
     	--consumer.config "$KAFVE_KAFKA_CONSUMER_CONFIG" \
@@ -95,7 +99,7 @@ consumer_start() {
     	> "$log_file" 2>&1 &
     local consumer_pid=$!
 
-	# Comprueba que se ha inicializado correctamente
+	### Comprueba que se ha inicializado correctamente
     sleep 1
     if ps -p $consumer_pid > /dev/null; then
        echo "[DONE] Consumidor del tópico '$topic' iniciado en segundo plano."
@@ -114,13 +118,13 @@ consumer_info() {
 
 	echo "[RUN] Abriendo visor de logs para el consumer en tiempo real..."
 
-	# Comprueba si esta arrancado el consumer para el topic
+	### Comprueba si esta arrancado el consumer para el topic
     if ! is_consumer_running "$topic"; then
     	echo "[ERROR] No existe un consumer para el tópico: $topic"
     	exit 0
     fi
 
-	# Comprueba si existe el log para visualizar
+	### Comprueba si existe el log para visualizar
     if [[ ! -f "$log_file" ]]; then
     	echo " -[ERROR] No se ha encontrado el archivo de log: $log_file"
     fi
@@ -128,7 +132,7 @@ consumer_info() {
    	trap 'echo -e "\n[DONE] Has salido del visor de logs del consumer"; return' INT
     tail -f "$log_file"
 
-    # Limpiamos la trap al salir para no afectar al resto del script
+    ### Limpiamos la trap al salir para no afectar al resto del script
     trap - INT
 }
 
@@ -150,7 +154,7 @@ consumer_stop() {
 
     echo "[RUN] Deteniendo consumidor del tópico '$topic'"
 
-	# Buscamos el pid del consumer para el tópico pasado
+	### Buscamos el pid del consumer para el tópico pasado
     local pid
     # shellcheck disable=SC2009
     pid=$(ps -ef | \
@@ -165,7 +169,7 @@ consumer_stop() {
 
         kill "$pid"
 
-        # Verificamos si realmente murió
+        ### Verificamos si realmente murió
         sleep 2
         if ps -p "$pid" > /dev/null 2>&1; then
             echo " -[WARN] No cerró a tiempo, forzando parada..."
@@ -173,7 +177,7 @@ consumer_stop() {
             echo " -[OK] Consumidor detenido forzando la parada."
         fi
 
-        # Elimina el archivo de log como parte del proceso de parada y limpieza del consumer anterior
+        ### Elimina el archivo de log como parte del proceso de parada y limpieza del consumer anterior
         if [[ -f "$log_file" ]]; then
             rm -f "$log_file"
             echo " -[OK] Borrado archivo de log del consumer"
@@ -190,7 +194,7 @@ consumer_stop() {
 consumer_status() {
 	echo "[RUN] Consultando estado de los Consumers..."
 
-    # Imprimimos en pantalla los consumers activos
+    ### Imprimimos en pantalla los consumers activos
 	echo "-------------------------------------------------------------------------------------------"
     printf "| %-8s | %-22s | %-8s | %-40s |\n" "PID" "TOPIC" "TIME" "BROKER URL"
     echo "-------------------------------------------------------------------------------------------"
@@ -215,5 +219,7 @@ print_consumer_status_row() {
 	printf "| %-8s | %-22s | %-8s | %-40s |\n" "$label_pid" "$label_topic" "$label_time" "$label_broker_url"
 }
 
-# MAIN RUN
+################################################################################
+#                               MAIN RUN                                       #
+################################################################################
 main_consumer "$@"

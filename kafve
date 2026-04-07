@@ -1,22 +1,46 @@
 #!/usr/bin/env bash
 
-# MAIN
-init_conf() {
-  local kafve_config_file="./config/kafve.conf"
+################################################################################
+#                                  MAIN                                        #
+################################################################################
 
-  if [ -f "$kafve_config_file" ]; then
-      set -a
-        # shellcheck disable=SC1090
-        source "$kafve_config_file"
-      set +a
+# ------------------------------------------------------------------------------
+# Preparación del entorno y carga de configuración
+# ------------------------------------------------------------------------------
+init_configuration() {
+  	# shellcheck disable=SC2155
+  	local os_name=$(uname -s)
+  	local kafve_config_file="./config/kafve.conf"
 
-      echo "-- $KAFVE_NAME v$KAFVE_VERSION ($KAFVE_ENVIRONMENT) --"
-  else
-      echo "[ERROR] No se encontró el archivo 'kafve.conf'."
-      exit 1
-  fi
+	# TODO: Implementar soporte para win
+	case "$os_name" in
+	    Linux*)
+	    	OS="Linux";;
+	    Darwin*)
+	    	OS="Mac";;
+	    CYGWIN*|MINGW*|MSYS*)
+	    	OS="Windows";;
+	    *)
+	    	OS="Desconocido"
+	esac
+	export OS
+
+	if [ -f "$kafve_config_file" ]; then
+	    set -a
+	      # shellcheck disable=SC1090
+	      source "$kafve_config_file"
+	    set +a
+	    echo "-- $KAFVE_NAME v$KAFVE_VERSION ($KAFVE_ENVIRONMENT) [$OS] --"
+	    return 0
+	else
+	    echo "[ERROR] No se encontró el archivo 'kafve.conf'."
+	    exit 1
+	fi
 }
 
+# ------------------------------------------------------------------------------
+# Punto de entrada principal
+# ------------------------------------------------------------------------------
 main() {
     if [ -z "$1" ]; then
         print_help
@@ -50,6 +74,9 @@ main() {
     esac
 }
 
+# ------------------------------------------------------------------------------
+# Guía de uso y acciones disponibles
+# ------------------------------------------------------------------------------
 print_help() {
     echo '
 Uso:
@@ -141,8 +168,10 @@ Configuración:
   exit 0
 }
 
-# MAIN RUN
-echo "[WARN] Este proyecto está configurado ÚNICAMENTE para DESARROLLO.
-[WARN] Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad."
-init_conf
+################################################################################
+#                               MAIN RUN                                       #
+################################################################################
+echo "[WARN] Este proyecto está configurado ÚNICAMENTE para DESARROLLO."
+echo "[WARN] Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad."
+init_configuration
 main "$@"
