@@ -48,19 +48,19 @@ broker_init() {
     local log_dir
 
 	### Verifica el estado del broker y lo detiene si está activo
-	if assert_broker_running; then
+	if is_broker_running; then
 	    echo " -[INFO] Broker detectado en ejecución. Deteniendo para reinicialización..."
 	    broker_stop
 	fi
 
     ### Busca el directorio de configuración para Kafka
-    if [[ ! -f "$KAFVE_KAFKA_CONFIG" ]]; then
-        echo "[ERROR] No se encuentra el archivo de configuración en $KAFVE_KAFKA_CONFIG"
-        return 1
+    if [[ ! -f $(kafve_commons::normalize_path "$KAFVE_KAFKA_CONFIG") ]]; then
+        echo "[ERROR] No se encuentra el archivo de configuración en $KAFVE_KAFKA_CONFIG" >&2
+        exit 1
     fi
 
     ### Toma el directorio para guardar la metadata del cluster de KAFVE_KAFKA_CONFIG (Por defecto un server.properties)
-    log_dir=$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | cut -d'=' -f2 | tr -d '\r')
+    log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | head -n 1 | cut -d'=' -f2)")
 
     ### Verifica y crea si es necesario el directorio .data
     if [[ -d "$log_dir" ]]; then
@@ -69,17 +69,17 @@ broker_init() {
             rm -rf "$log_dir"
             mkdir -p "$log_dir"
         else
-            echo "[ERROR] El directorio $log_dir ya contiene datos."
-            echo "[ERROR] Usa --force si quieres borrar el cluster actual y crear uno nuevo."
-            return 1
+            echo "[ERROR] El directorio $log_dir ya contiene datos." >&2
+            echo "[ERROR] Usa --force si quieres borrar el cluster actual y crear uno nuevo." >&2
+            exit 1
         fi
     fi
 
     ### Generación de Id de Cluster Kafka
-    cluster_id=$("$KAFVE_KAFKA_STORAGE_BIN" random-uuid)
+    cluster_id=$($(kafve_commons::get_kafka_script "kafka-storage" "$KAFVE_KAFKA_DIR") random-uuid)
     if [[ -z "$cluster_id" ]]; then
-            echo "[ERROR] No se pudo generar el Cluster ID"
-            return 1
+            echo "[ERROR] No se pudo generar el Cluster ID" >&2
+            exit 1
     fi
     echo " -[OK]  Cluster ID generado: $cluster_id"
 
@@ -89,18 +89,20 @@ broker_init() {
         echo "[DONE]  Configuración del Broker finalizada."
         return 0
     else
-    	echo "[ERROR] Se ha producido un error formateando el cluster"
+    	echo "[ERROR] Se ha producido un error formateando el cluster" >&2
     	exit 1
 	fi
 }
 
 broker_init_run() {
 	local cluster_id="$1"
+	local script_path
 
-	"$KAFVE_KAFKA_STORAGE_BIN" format \
-        --standalone \
-        -t "$cluster_id" \
-        -c "$KAFVE_KAFKA_CONFIG"
+	script_path=$(kafve_commons::get_kafka_script "kafka-storage" "$KAFVE_KAFKA_DIR")
+	"$script_path" format \
+       --standalone \
+       -t "$cluster_id" \
+       -c "$KAFVE_KAFKA_CONFIG"
 }
 
 # ------------------------------------------------------------------------------
@@ -109,29 +111,38 @@ broker_init_run() {
 broker_start() {
 	local force_flag="$1"
 
-    echo "[RUN]  Inicializando Broker..."
+    echo "[RUN] Inicializando Broker..."
 
 	### Comprueba si existe la carpeta para los logs, especificado en el server.properties
-    log_dir=$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | cut -d'=' -f2 | tr -d '\r')
+    log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | head -n 1 | cut -d'=' -f2)")
     if [[ ! -d "$log_dir" || "$force_flag" == true ]]; then
-        broker_init
+        broker_init "$force_flag"
     fi
 
 	### Comprueba si ya hay un broker inicializado
-    if jps | grep -q "Kafka"; then
-      echo "[DONE-SKIP] El Broker ya había sido inicializado"
-      return 0
+    if is_broker_running; then
+      echo "[SKIP] El Broker ya está en ejecución."
+      exit 0
     fi
 
-    "${KAFVE_KAFKA_DIR}/bin/kafka-server-start.sh" -daemon config/server.properties;
+	### Ejecuta el script de inicio del servidor Kafka en segundo plano
+    broker_start_run
 
+	### Espera unos segundos y verifica si el proceso se mantiene activo
 	sleep 2
-    assert_broker_running
+	if ! is_broker_running; then
+      echo "[ERROR] El Broker no ha podido inicializarse correctamente" >&2
+    fi
 
     echo "[DONE] Se ha inicializado el broker"
 }
 
+broker_start_run() {
+	local script_path
+	script_path=$(kafve_commons::get_kafka_script "kafka-server-start" "$KAFVE_KAFKA_DIR")
 
+	$script_path -daemon config/server.properties
+}
 
 # ------------------------------------------------------------------------------
 # Parada del broker
@@ -140,7 +151,7 @@ broker_stop() {
     echo "[RUN] Deteniendo Broker..."
 
     ### Señal de parada oficial del broker
-    "${KAFVE_KAFKA_DIR}/bin/kafka-server-stop.sh"
+    "$(kafve_commons::get_kafka_script "kafka-server-stop" "$KAFVE_KAFKA_DIR")"
     echo " -[TASK] Enviada señal de parada oficial"
 
     echo " -[WAIT] Esperando finalización del proceso de parada del broker"
@@ -165,7 +176,10 @@ broker_stop() {
 broker_status() {
     echo "[RUN] Consultando estado del Broker..."
 
-    assert_broker_running
+	if ! is_broker_running; then
+	    echo "[ERROR] El Broker no se encuentra activo." >&2
+	    exit 1
+	fi
 
     echo "------------------------------------------------------------------------------------"
     printf "| %-8s | %-6s | %-60s |\n" "PID" "ESTADO" "CLUSTER ID (UUID)"
@@ -188,7 +202,7 @@ print_broker_status_row() {
     label_pid=$(echo "$line" | awk '{print $2}')
 
     local log_dir
-    log_dir=$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | cut -d'=' -f2 | tr -d '\r')
+    log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | head -n 1 | cut -d'=' -f2)")
     if [[ -f "$log_dir/meta.properties" ]]; then
         label_cluster_id=$(grep "cluster.id" "$log_dir/meta.properties" | cut -d'=' -f2 | tr -d '\r')
     fi
@@ -205,7 +219,7 @@ broker_info() {
 	### Comprueba si existe archivo de log
     local log_file="${KAFVE_KAFKA_DIR}/logs/server.log"
     if [[ ! -f "$log_file" ]]; then
-        echo "[ERROR] No se encuentra el archivo en: $log_file"
+        echo "[ERROR] No se encuentra el archivo en: $log_file" >&2
         return 1
     fi
 
@@ -224,18 +238,20 @@ broker_info() {
     trap - INT
 }
 
-# Comprueba si existen brokers activos
-assert_broker_running() {
-	local kafka_jps_data
-
-	kafka_jps_data=$(jps -l | grep -i 'kafka.kafka' )
-    if [[ -z $kafka_jps_data ]]; then
-        echo "[ERROR] No se han encontrado procesos activos"
-        exit 1
-    fi
+# Verifica si el proceso de Kafka está activo mediante jps
+# Retorna 0 (true) si se encuentra 'kafka.kafka', 1 (false) en caso contrario
+is_broker_running() {
+    jps -l | grep -iq "kafka.kafka"
 }
 
 ################################################################################
 #                               MAIN RUN                                       #
 ################################################################################
+if [[ -f "$(dirname "$0")/kafve-commons" ]]; then
+    source "$(dirname "$0")/kafve-commons"
+else
+    echo "[ERROR] No se encontró '$(dirname "$0")'/kafve-commons. Abortando." >&2
+    exit 1
+fi
+
 main_broker "$@"

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+echo "[INFO] Librería kafve_commons cargada correctamente"
+
+# @description Normaliza una ruta eliminando basura de Windows, comillas y espacios.
+#              Si detecta Windows, convierte la ruta al formato Unix (Cygwin/MSYS).
+# @param $1 string Ruta original a limpiar.
+# @stdout string La ruta saneada y normalizada.
+kafve_commons::normalize_path() {
+	local path="$1"
+	local normalize_path
+
+	### Extracción y limpieza de la ruta del log
+    normalize_path=$(echo "$path" | sed -e 's/\r//g' -e 's/^"//' -e 's/"$//' | xargs)
+
+	### Conversión Windows -> Unix
+	if [[ "$OS" == "Windows" ]]; then
+		normalize_path=$(cygpath -u "$normalize_path")
+	fi
+
+	### Retorna la ruta normalizada
+	echo "$normalize_path"
+}
+
+# @description Construye el path al ejecutable de Kafka según el Sistema Operativo.
+#              Gestiona automáticamente la subcarpeta /windows/ y la extensión .bat.
+# @param $1 string Nombre del script (ej: kafka-topics).
+# @param $2 string [Opcional] Directorio base de Kafka (default: ".").
+# @stdout string Path relativo o absoluto al script (.sh o .bat).
+kafve_commons::get_kafka_script() {
+    local script_name="$1"
+    local base_path="${2:-.}"
+    base_path=$(kafve_commons::normalize_path "$base_path")
+    local full_path=""
+
+    if [[ "$OS" == "Windows" ]]; then
+        full_path="${base_path}/bin/windows/${script_name}.bat"
+    else
+        full_path="${base_path}/bin/${script_name}.sh"
+    fi
+
+    # Limpiar el path si empieza con ./ para que se vea más estético
+    echo "${full_path}"
+}

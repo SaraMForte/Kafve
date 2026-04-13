@@ -171,7 +171,12 @@ Configuración:
 ################################################################################
 #                               MAIN RUN                                       #
 ################################################################################
-echo "[WARN] Este proyecto está configurado ÚNICAMENTE para DESARROLLO."
-echo "[WARN] Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad."
+echo -e "\e[33m[WARN] Este proyecto está configurado ÚNICAMENTE para DESARROLLO.\e[0m"
+echo -e "\e[33m[WARN] Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad.\e[0m"
+
+# Inicializa entorno e importa librería de utilidades comunes
 init_configuration
+
+# Punto de entrada principal con paso de argumentos
 main "$@"
+exit $?
