@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Evitar cargas múltiples.
+[[ -n "${KAFVE_LOGGER_SH_}" ]] && return 0
+readonly KAFVE_LOGGER_SH_=1
+
+# Configuración de colores basada en si stderr es una terminal.
+if [[ -t 2 ]]; then
+  readonly COLOR_RED='\033[0;31m'
+  readonly COLOR_YELLOW='\033[0;33m'
+  readonly COLOR_GREEN='\033[0;32m'
+  readonly COLOR_NC='\033[0m'
+else
+  readonly COLOR_RED=''
+  readonly COLOR_YELLOW=''
+  readonly COLOR_GREEN=''
+  readonly COLOR_NC=''
+fi
+
+# @description Imprime mensajes de proceso en curso.
+function logger::run() {
+  printf "[RUN] %s\n" "$1" >&2
+}
+
+# @description Imprime mensajes de éxito.
+function logger::ok() {
+  printf " -[OK] %s\n" "$1" >&2
+}
+
+# @description Imprime el mensaje de finalización exitosa (Verde).
+function logger::done() {
+  printf "%b[DONE] %s%b\n" "${COLOR_GREEN}" "$1" "${COLOR_NC}" >&2
+}
+
+# @description Imprime advertencias en amarillo.
+function logger::warn() {
+  printf "%b[WARN] %s%b\n" "${COLOR_YELLOW}" "$1" "${COLOR_NC}" >&2
+}
+
+# @description Imprime errores en rojo y hacia stderr.
+function logger::err() {
+  printf "%b[ERROR] %s%b\n" "${COLOR_RED}" "$1" "${COLOR_NC}" >&2
+}
