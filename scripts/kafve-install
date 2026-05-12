@@ -12,14 +12,15 @@ set -o pipefail
 
 # @description Limpia y notifica fallos.
 function catch_error() {
-  local -r line_number="$1"
-  local -r script_name="${BASH_SOURCE[1]:-$0}"
+  	local -r line_number="$1"
+  	local -r script_name="${BASH_SOURCE[1]:-$0}"
 
-  logger::err "Error en ${script_name}:${line_number}"
-  logger::err "Comando fallido: '${BASH_COMMAND}'"
+  	logger::err "Error en ${script_name}:${line_number}"
+  	logger::err "Comando fallido: '${BASH_COMMAND}'"
 
-  [[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
-  exit 1
+	# Funciones de borrado personalizadas dada las funciones
+  	[[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
+  	exit 1
 }
 
 trap 'catch_error $LINENO' ERR
