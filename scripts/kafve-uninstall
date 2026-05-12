@@ -1,31 +1,46 @@
 #!/usr/bin/env bash
 
-################################################################################
-#                                   VARS                                       #
-################################################################################
-readonly BLACK_LIST=("$KAFVE_KAFKA_DIR" "temp" "log" ".data")
+# --- CONFIG --------------------------------------------------------
+source "./scripts/logger"
 
-################################################################################
-#                                   MAIN                                       #
-################################################################################
+set -o errexit
+set -o errtrace
+set -o nounset
+set -o pipefail
+
+# --- ERROR CONTROL --------------------------------------------------------
+
+# @description Limpia y notifica fallos.
+function catch_error() {
+  	local -r line_number="$1"
+  	local -r script_name="${BASH_SOURCE[1]:-$0}"
+
+  	logger::err "Error en ${script_name}:${line_number}"
+  	logger::err "Comando fallido: '${BASH_COMMAND}'"
+}
+
+trap 'catch_error $LINENO' ERR
+
+# --- VARS -----------------------------------------------------------
+readonly BLACK_LIST=("$KAFVE_KAFKA_DIR" "log" ".data")
+
+# --- FUNCTIONS -----------------------------------------------------------
 run_clean() {
-    echo "[RUN] Iniciando limpieza interna..."
+    logger::run "Iniciando limpieza interna..."
 
     # TODO: Que pare los consumer y brokers
 
     for rute in "${BLACK_LIST[@]}"; do
         if [ -e "$rute" ]; then
             rm -rf "$rute"
-            echo " -[OK]    '$rute' eliminado con éxito."
+            logger::ok "'$rute' eliminado con éxito."
         else
-            echo " -[SKIP]  '$rute' no existe, saltando..."
+            logger::custom "SKIP" "'$rute' no existe, saltando..."
         fi
     done
 
-    echo "[DONE] Limpieza completada."
+    logger::done "Limpieza completada."
 }
 
-################################################################################
-#                                MAIN RUN                                      #
-################################################################################
+# --- MAIN RUN -----------------------------------------------------------
 run_clean
