@@ -1,43 +1,63 @@
 #!/bin/bash
 
+# --- CONFIG -----------------------------------------------------------
+
 # Evitar cargas múltiples.
 [[ -n "${KAFVE_LOGGER_SH_}" ]] && return 0
 readonly KAFVE_LOGGER_SH_=1
 
 # Configuración de colores basada en si stderr es una terminal.
 if [[ -t 2 ]]; then
-  readonly COLOR_RED='\033[0;31m'
-  readonly COLOR_YELLOW='\033[0;33m'
-  readonly COLOR_GREEN='\033[0;32m'
-  readonly COLOR_NC='\033[0m'
+  	readonly COLOR_RED='\033[0;31m'
+  	readonly COLOR_YELLOW='\033[0;33m'
+  	readonly COLOR_GREEN='\033[0;32m'
+  	readonly COLOR_NC='\033[0m'
 else
-  readonly COLOR_RED=''
-  readonly COLOR_YELLOW=''
-  readonly COLOR_GREEN=''
-  readonly COLOR_NC=''
+  	readonly COLOR_RED=''
+  	readonly COLOR_YELLOW=''
+  	readonly COLOR_GREEN=''
+  	readonly COLOR_NC=''
 fi
 
+# --- FUNCTIONS -----------------------------------------------------------
+
 # @description Imprime mensajes de proceso en curso.
+# @stderr
 function logger::run() {
-  printf "[RUN] %s\n" "$1" >&2
+  	printf "[RUN] %s\n" "$1" >&2
 }
 
 # @description Imprime mensajes de éxito.
+# @stderr
 function logger::ok() {
-  printf " -[OK] %s\n" "$1" >&2
+  	printf " -[OK] %s\n" "$1" >&2
+}
+
+# @description Formatea e imprime un mensaje de log con un prefijo de estado.
+# @param $1 string Etiqueta que identifica el tipo de proceso (ej: INFO, WAIT).
+# @param $2 string Mensaje descriptivo de la acción realizada.
+# @stderr
+function logger::custom() {
+	local label="${1^^}"
+    local -r final_label="${label:0:6}"
+
+  	printf " -[%s] %s\n" "${final_label}" "$2" >&2
 }
 
 # @description Imprime el mensaje de finalización exitosa (Verde).
+# @stderr
 function logger::done() {
-  printf "%b[DONE] %s%b\n" "${COLOR_GREEN}" "$1" "${COLOR_NC}" >&2
+  	printf "%b[DONE] %s%b\n" "${COLOR_GREEN}" "$1" "${COLOR_NC}" >&2
 }
 
 # @description Imprime advertencias en amarillo.
+# @stderr
 function logger::warn() {
-  printf "%b[WARN] %s%b\n" "${COLOR_YELLOW}" "$1" "${COLOR_NC}" >&2
+  	printf "%b[WARN] %s%b\n" "${COLOR_YELLOW}" "$1" "${COLOR_NC}" >&2
 }
 
-# @description Imprime errores en rojo y hacia stderr.
+# @description Imprime errores en rojo.
+# @stderr
 function logger::err() {
-  printf "%b[ERROR] %s%b\n" "${COLOR_RED}" "$1" "${COLOR_NC}" >&2
+  	printf "%b[ERROR] %s%b\n" "${COLOR_RED}" "$1" "${COLOR_NC}" >&2
 }
