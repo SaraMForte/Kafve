@@ -1,42 +1,53 @@
 #!/usr/bin/env bash
 
-################################################################################
-#                                ERROR CONTROL                                 #
-################################################################################
-set -e
+# --- CONFIG --------------------------------------------------------
+source "./scripts/logger"
 
-catch_error() {
-    local archivo=${BASH_SOURCE[1]:-$0}
+set -o errexit
+set -o errtrace
+set -o nounset
+set -o pipefail
 
-    echo "[ERROR] Error en $archivo:$1"
-    echo "[ERROR] Comando: '$BASH_COMMAND'"
+# --- ERROR CONTROL --------------------------------------------------------
 
-    rm -rf "opt"
-    exit 1
+# @description Limpia y notifica fallos.
+function catch_error() {
+  local -r line_number="$1"
+  local -r script_name="${BASH_SOURCE[1]:-$0}"
+
+  logger::err "Error en ${script_name}:${line_number}"
+  logger::err "Comando fallido: '${BASH_COMMAND}'"
+
+  [[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
+  exit 1
 }
 
 trap 'catch_error $LINENO' ERR
 
-################################################################################
-#                                   MAIN                                      #
-################################################################################
-echo "[RUN] Iniciando instalación de Kafve..."
+# --- VARS --------------------------------------------------------
+KAFKA_TEMP_DIR="";
 
-# TODO: A priori todos los SO tienen sus carpetas temporales, es posible que exista una forma relativamente cómoda de
-#  obtenerla independientemente del SO.
-mkdir -p "temp"
-echo " -[OK]  Carpeta temporal preparada."
+# --- FUNCTIONS --------------------------------------------------------
 
-curl -L "$KAFVE_KAFKA_URL" -o "temp/$KAFVE_KAFKA_FILE_NAME.tgz"
-echo " -[OK]  Descarga de Kafka finalizada."
+# @description Ejecuta el flujo de instalación.
+function run_install() {
+	KAFKA_TEMP_DIR="$(mktemp -d -t kafve.XXXXXX)"
+	logger::ok "Carpeta temporal preparada en ${KAFKA_TEMP_DIR}."
 
-mkdir -p "$KAFVE_KAFKA_DIR"
-echo " -[OK]  Directorio de instalación configurado."
+	curl -L --ssl-no-revoke --progress-bar "${KAFVE_KAFKA_URL}" -o "${KAFKA_TEMP_DIR}/${KAFVE_KAFKA_FILE_NAME}.tgz"
+	logger::ok "Descarga de Kafka finalizada."
 
-tar -xzf "temp/$KAFVE_KAFKA_FILE_NAME.tgz" -C "$KAFVE_KAFKA_DIR" --strip-components=1
-echo " -[OK]  Archivos extraídos en el destino final -> '$KAFVE_KAFKA_DIR'"
+	mkdir -p "${KAFVE_KAFKA_DIR}"
+	logger::ok "Directorio de instalación configurado."
 
-rm -rf "temp"
-echo " -[OK]  Archivos temporales eliminados."
+	tar -xzf "${KAFKA_TEMP_DIR}/${KAFVE_KAFKA_FILE_NAME}.tgz" -C "${KAFVE_KAFKA_DIR}" --strip-components=1
+	logger::ok "Archivos extraídos en el destino final -> '${KAFVE_KAFKA_DIR}'"
 
-echo "[DONE] Instalacion finalizada en: $(pwd)/$KAFVE_KAFKA_DIR"
+	rm -rf "${KAFKA_TEMP_DIR}"
+	logger::ok "Archivos temporales eliminados."
+}
+
+# --- MAIN RUN --------------------------------------------------------
+logger::run "Iniciando instalación de Kafve..."
+run_install
+logger::done "Instalación finalizada en: $(pwd)/${KAFVE_KAFKA_DIR}"
