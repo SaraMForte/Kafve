@@ -51,7 +51,8 @@ main() {
             print_help
             ;;
         "install")
-            ./scripts/kafve-install
+            # ./scripts/kafve-install
+            ./scripts/kafve-dummy-certs generate
             ;;
         "uninstall")
             ./scripts/kafve-uninstall
