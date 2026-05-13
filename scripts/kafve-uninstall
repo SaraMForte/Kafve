@@ -22,7 +22,7 @@ function catch_error() {
 trap 'catch_error $LINENO' ERR
 
 # --- VARS -----------------------------------------------------------
-readonly BLACK_LIST=("$KAFVE_KAFKA_DIR" "log" ".data")
+readonly BLACK_LIST=("$KAFVE_KAFKA_DIR" "deps" "log" ".data" "config/cert")
 
 # --- FUNCTIONS -----------------------------------------------------------
 run_clean() {

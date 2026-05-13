@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# --- CONFIG --------------------------------------------------------
+source "./scripts/logger"
+
+set -o errexit
+set -o errtrace
+set -o nounset
+set -o pipefail
+
+# --- ERROR CONTROL --------------------------------------------------------
+
+# @description Limpia y notifica fallos.
+function catch_error() {
+  	local -r line_number="$1"
+  	local -r script_name="${BASH_SOURCE[1]:-$0}"
+
+  	logger::err "Error en ${script_name}:${line_number}"
+  	logger::err "Comando fallido: '${BASH_COMMAND}'"
+
+	# Funciones de borrado personalizadas dada las funciones
+  	[[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
+  	exit 1
+}
+
+trap 'catch_error $LINENO' ERR
+
+# --- VARS --------------------------------------------------------
+readonly CERTIFICATE_RUTE="./config/cert"
+readonly PASSWORD="dummydummy"
+readonly VALIDITY_DAYS=36500
+readonly DNAME="CN=localhost, OU=dummy, O=dummy, L=City, S=State, C=ES"
+
+# --- FUNCTIONS -----------------------------------------------------------
+
+kafve-dummy-certificates::clean() {
+	rm -rf "${CERTIFICATE_RUTE}"
+}
+
+kafve-dummy-certificates::generate() {
+	logger::run "Creación de los certificados y credenciales dummy"
+
+	logger::ok "Carpeta de certificados dummy preparada en ${CERTIFICATE_RUTE}."
+	mkdir -p "${CERTIFICATE_RUTE}"
+
+    # Generar CA Raíz
+    logger::ok "Generando CA Raíz..."
+    openssl req -new -x509 -days ${VALIDITY_DAYS} -passout pass:${PASSWORD} \
+        -keyout "${CERTIFICATE_RUTE}/ca-key" -out "${CERTIFICATE_RUTE}/ca-cert" -subj "/CN=MyRootCA"
+
+    # Generar Keystore del Broker
+    logger::ok "Generando Keystore..."
+    keytool -genkey -keystore "${CERTIFICATE_RUTE}/kafka.broker.keystore.jks" \
+        -alias localhost -validity ${VALIDITY_DAYS} -keyalg RSA \
+        -dname "${DNAME}" -storepass ${PASSWORD} -keypass ${PASSWORD}
+
+    # Crear una solicitud de firma (CSR) desde el Keystore
+    logger::ok "Creando solicitud de firma (CSR)..."
+    keytool -keystore "${CERTIFICATE_RUTE}/kafka.broker.keystore.jks" -alias localhost \
+        -certreq -file "${CERTIFICATE_RUTE}/cert-file-sw" -storepass ${PASSWORD}
+
+    # Firmar el certificado del Broker con nuestra CA Raíz
+    logger::ok "Firmando el certificado con la CA..."
+    openssl x509 -req \
+        -CA "${CERTIFICATE_RUTE}/ca-cert" -CAkey "${CERTIFICATE_RUTE}/ca-key" \
+        -in "${CERTIFICATE_RUTE}/cert-file-sw" -out "${CERTIFICATE_RUTE}/cert-signed" \
+        -days ${VALIDITY_DAYS} \
+        -CAcreateserial -CAserial "${CERTIFICATE_RUTE}/ca-cert.srl" \
+        -passin pass:${PASSWORD}
+
+    # Importar la CA y el certificado firmado de vuelta al Keystore
+    logger::ok "Importando CA y certificado firmado al Keystore..."
+    keytool -keystore "${CERTIFICATE_RUTE}/kafka.broker.keystore.jks" -alias CARoot \
+        -import -file "${CERTIFICATE_RUTE}/ca-cert" -storepass ${PASSWORD} -noprompt
+
+    keytool -keystore "${CERTIFICATE_RUTE}/kafka.broker.keystore.jks" -alias localhost \
+        -import -file "${CERTIFICATE_RUTE}/cert-signed" -storepass ${PASSWORD}
+
+    # Generar Truststore (Para que los clientes confíen en la CA)
+    logger::ok "Generando Truststore..."
+    keytool -keystore "${CERTIFICATE_RUTE}/kafka.broker.truststore.jks" \
+        -alias CARoot -import -file "${CERTIFICATE_RUTE}/ca-cert" \
+        -storepass ${PASSWORD} -noprompt
+
+    logger::done "Ahora la cadena de confianza es completa."
+}
+
+kafve-dummy-certificates::help() {
+	echo '
+-------------------------------------------------------
+Comandos disponibles:
+  - generate: Limpia el directorio y crea nuevos certificados.
+  - clean:    Elimina los certificados existentes.
+-------------------------------------------------------
+'
+}
+
+# --- MAIN -----------------------------------------------------------
+case "${1:-}" in
+    "generate")
+        kafve-dummy-certificates::clean
+        kafve-dummy-certificates::generate
+        ;;
+    "clean")
+        kafve-dummy-certificates::clean
+        ;;
+    *)
+        logger::err "Acción inválida: ${1}"
+        logger::err "El script ${0} no reconoce este comando."
+        kafve-dummy-certificates::help
+        exit 1
+        ;;
+esac

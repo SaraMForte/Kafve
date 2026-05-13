@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 
-################################################################################
-#                                  MAIN                                        #
-################################################################################
+# --- CONFIG --------------------------------------------------------
+source "./scripts/logger"
 
-# ------------------------------------------------------------------------------
-# Preparación del entorno y carga de configuración
-# ------------------------------------------------------------------------------
+set -o errexit
+set -o errtrace
+set -o nounset
+set -o pipefail
+
+# --- ERROR CONTROL --------------------------------------------------------
+
+# @description Limpia y notifica fallos.
+# shellcheck disable=SC2317
+function catch_error() {
+  	local -r line_number="$1"
+  	local -r script_name="${BASH_SOURCE[1]:-$0}"
+  	local -r func_name="${FUNCNAME[1]:-main}"
+
+  	logger::err "Error en ${script_name}:${line_number}"
+  	logger::err "Función: ${func_name}()"
+  	logger::err "Comando fallido: '${BASH_COMMAND}'"
+}
+
+trap 'catch_error $LINENO' ERR
+
+# --- FUNCTIONS -----------------------------------------------------------
+
+# @description Preparación del entorno y carga de configuración
 init_configuration() {
   	# shellcheck disable=SC2155
   	local os_name=$(uname -s)
@@ -28,19 +48,17 @@ init_configuration() {
 	if [ -f "$kafve_config_file" ]; then
 	    set -a
 	      # shellcheck disable=SC1090
-	      source "$kafve_config_file"
+	      source "${kafve_config_file}"
 	    set +a
-	    echo "-- $KAFVE_NAME v$KAFVE_VERSION ($KAFVE_ENVIRONMENT) [$OS] --"
+	    echo "-- ${KAFVE_NAME} v${KAFVE_VERSION} (${KAFVE_ENVIRONMENT}) [${OS}] --"
 	    return 0
 	else
-	    echo "[ERROR] No se encontró el archivo 'kafve.conf'."
+	    logger::err "No se encontró el archivo 'kafve.conf'."
 	    exit 1
 	fi
 }
 
-# ------------------------------------------------------------------------------
-# Punto de entrada principal
-# ------------------------------------------------------------------------------
+# @description Punto de entrada principal
 main() {
     if [ -z "$1" ]; then
         print_help
@@ -51,7 +69,8 @@ main() {
             print_help
             ;;
         "install")
-            ./scripts/kafve-install
+            # ./scripts/kafve-install
+            ./scripts/kafve-dummy-certs generate
             ;;
         "uninstall")
             ./scripts/kafve-uninstall
@@ -74,9 +93,7 @@ main() {
     esac
 }
 
-# ------------------------------------------------------------------------------
-# Guía de uso y acciones disponibles
-# ------------------------------------------------------------------------------
+# @description Guía de uso y acciones disponibles
 print_help() {
     echo '
 Uso:
@@ -168,11 +185,9 @@ Configuración:
   exit 0
 }
 
-################################################################################
-#                               MAIN RUN                                       #
-################################################################################
-echo -e "\e[33m[WARN] Este proyecto está configurado ÚNICAMENTE para DESARROLLO.\e[0m"
-echo -e "\e[33m[WARN] Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad.\e[0m"
+# --- MAIN -----------------------------------------------------------
+logger::warn "Este proyecto está configurado ÚNICAMENTE para DESARROLLO."
+logger::warn "Nunca debe usarse en entornos de PRODUCCIÓN por motivos de seguridad."
 
 # Inicializa entorno e importa librería de utilidades comunes
 init_configuration
