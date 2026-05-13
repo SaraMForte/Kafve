@@ -1,10 +1,8 @@
 #!/bin/bash
 
 # --- CONFIG -----------------------------------------------------------
-
 # Evitar cargas múltiples.
-[[ -n "${KAFVE_LOGGER_SH_}" ]] && return 0
-readonly KAFVE_LOGGER_SH_=1
+[[ ${KAFVE__LOGGER_LOADED+true} ]] && return 0
 
 # Configuración de colores basada en si stderr es una terminal.
 if [[ -t 2 ]]; then
@@ -61,3 +59,6 @@ function logger::warn() {
 function logger::err() {
   	printf "%b[ERROR] %s%b\n" "${COLOR_RED}" "$1" "${COLOR_NC}" >&2
 }
+
+# Establece que la librería KAFVE__LOGGER_LOADED
+readonly KAFVE__LOGGER_LOADED=true
