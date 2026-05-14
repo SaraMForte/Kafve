@@ -19,7 +19,8 @@ function catch_error() {
   	logger::err "Comando fallido: '${BASH_COMMAND}'"
 
 	# Funciones de borrado personalizadas dada las funciones
-  	[[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
+  	[[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"ç
+  	./kafve-uninstall
   	exit 1
 }
 
@@ -30,7 +31,11 @@ KAFKA_TEMP_DIR="";
 
 # --- FUNCTIONS --------------------------------------------------------
 
-# @description Ejecuta el flujo de instalación.
+# @description Descarga, extrae e instala Apache Kafka, aplicando parches de compatibilidad.
+# @global KAFVE_KAFKA_URL
+# @global KAFVE_KAFKA_FILE_NAME
+# @global KAFVE_KAFKA_DIR
+# @return 0 si la instalación fue exitosa, 1 en caso de error.
 function run_install() {
 	KAFKA_TEMP_DIR="$(mktemp -d -t kafve.XXXXXX)"
 	logger::ok "Carpeta temporal preparada en ${KAFKA_TEMP_DIR}."
@@ -46,7 +51,76 @@ function run_install() {
 
 	rm -rf "${KAFKA_TEMP_DIR}"
 	logger::ok "Archivos temporales eliminados."
+
+	logger::custom "INFO" "Aplicando parches de compatibilidad para Windows..."
+	if ! fix_kafka_win_scripts; then
+		logger::err "No se han podido aplicar los parches de Windows."
+		exit 1
+	fi
+	logger::custom "INFO" "Todos los parches de Windows se aplicaron correctamente."
+	return 0
 }
+
+# @description Parchea scripts de Windows (.bat).
+# @global KAFVE_KAFKA_DIR
+# @return 0 si el parcheo fue exitoso, 1 en caso de error.
+function fix_kafka_win_scripts() {
+	local KAFKA_RUN_CLASS_BAT_PATH="${KAFVE_KAFKA_DIR}/bin/windows/kafka-run-class.bat"
+
+	if [[ ! -f "${KAFKA_RUN_CLASS_BAT_PATH}" ]]; then
+		logger::err "No se ha encontrado el archivo kafka-run-class.bat"
+		return 1
+	fi
+
+	kafka_fix::win::classpath_too_log "${KAFKA_RUN_CLASS_BAT_PATH}"
+	kafka_fix::win::dlog4j2_file_uri "${KAFKA_RUN_CLASS_BAT_PATH}"
+
+    return 0
+}
+
+# @description Reemplaza el bucle de librerías por un wildcard para evitar
+# límites de longitud de ruta (Path Too Long) en Windows.
+# @param $1 Ruta al archivo .bat (String)
+# @return 0 si tuvo éxito, 1 de lo contrario.
+function kafka_fix::win::classpath_too_log() {
+	local KAFKA_RUN_CLASS_BAT_PATH=$1
+	local filename;
+
+	filename=$(basename "${KAFKA_RUN_CLASS_BAT_PATH}")
+
+    local find_classpath_length='\|for %%i in ("%BASE_DIR%\\libs\\\*")|'
+    local fix_classpath_length='call :concat "%BASE_DIR%\\libs\\*"\n'
+
+    if sed -i "${find_classpath_length},+3c\\${fix_classpath_length}" "${KAFKA_RUN_CLASS_BAT_PATH}"; then
+        logger::ok "[${filename}] Classpath: bucle for reemplazado por wildcard (fix path limit)"
+        return 0
+    else
+    	logger::err "[${filename}] No se pudo aplicar el fix de Classpath"
+    	return 1
+    fi
+}
+
+# @description Corrige el esquema de la URI de Log4j para compatibilidad con Windows.
+# @param $1 Ruta al archivo .bat (String)
+# @return 0 si tuvo éxito, 1 de lo contrario.
+function kafka_fix::win::dlog4j2_file_uri() {
+	local KAFKA_RUN_CLASS_BAT_PATH=$1
+	local filename;
+
+	filename=$(basename "${KAFKA_RUN_CLASS_BAT_PATH}")
+
+    local find_uri_schema='Dlog4j2.configurationFile=file:'
+    local fix_uri_schema='Dlog4j2.configurationFile=file:///'
+
+	if sed -i "s|${find_uri_schema}|${fix_uri_schema}|g" "${KAFKA_RUN_CLASS_BAT_PATH}"; then
+        logger::ok "[${filename}] Log4j: URI de configuración normalizada"
+        return 0
+    else
+        logger::err "[${filename}] No se pudo normalizar la URI de Log4j"
+        return 1
+    fi
+}
+
 
 # --- MAIN RUN --------------------------------------------------------
 logger::run "Iniciando instalación de Kafve..."
