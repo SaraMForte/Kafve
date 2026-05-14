@@ -142,8 +142,7 @@ is_consumer_running() {
 	# shellcheck disable=SC2009
 	ps -ef | \
     	grep -e "--topic $topic" | \
-    	grep $KAFKA_CONSUMER_CLASS | \
-    	grep -v "grep" \
+    	grep $KAFKA_CONSUMER_CLASS \
     	> /dev/null 2>&1
 }
 
@@ -159,9 +158,8 @@ consumer_stop() {
     # shellcheck disable=SC2009
     pid=$(ps -ef | \
     	grep -e "--topic $topic" | \
-    	grep $KAFKA_CONSUMER_CLASS | \
-    	grep -v "grep" | \
-    	awk '{print $2}'
+    	grep $KAFKA_CONSUMER_CLASS \
+        > /dev/null 2>&1
     )
 
 	# Mata el proceso con el pid encontrado para ese tópico

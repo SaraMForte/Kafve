@@ -204,7 +204,7 @@ broker_status() {
     echo "------------------------------------------------------------------------------------"
 
     # shellcheck disable=SC2009
-    ps -ef | grep -i "kafka.kafka" | grep -v "grep" | while read -r line; do
+    ps -ef | grep -i "kafka.kafka" | while read -r line; do
         print_broker_status_row "$line"
     done
     echo "------------------------------------------------------------------------------------"
