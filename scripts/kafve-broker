@@ -147,6 +147,7 @@ broker_start() {
     broker_start_run
 
 	### Espera unos segundos y verifica si el proceso se mantiene activo
+	logger::custom "WAIT" "Verificando inicialización del proceso (esperando 2s)..."
 	sleep 2
 	if ! is_broker_running; then
       logger::err "El Broker no ha podido inicializarse correctamente" >&2
@@ -159,7 +160,13 @@ broker_start_run() {
 	local script_path
 	script_path=$(kafve_commons::get_kafka_script "kafka-server-start" "$KAFVE_KAFKA_DIR")
 
-	$script_path -daemon config/server.properties
+	if [[ ${OS} == "Windows" ]]; then
+		nohup "${script_path}" "$KAFVE_KAFKA_CONFIG" > /dev/null 2>&1 & local broker_pid=$!
+		logger::ok "Broker inicializado con el PID: ${broker_pid}"
+	else
+		$script_path -daemon config/server.properties & local broker_pid=$!
+		logger::ok "Broker inicializado con el PID: ${broker_pid}"
+	fi
 }
 
 # ------------------------------------------------------------------------------
