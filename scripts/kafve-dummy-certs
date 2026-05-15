@@ -18,7 +18,7 @@ function catch_error() {
   	logger::err "Comando fallido: '${BASH_COMMAND}'"
 
 	# Funciones de borrado personalizadas dada las funciones
-  	[[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
+  	[[ -d "${CERTIFICATE_RUTE}" ]] && rm -rf "${CERTIFICATE_RUTE}"
   	exit 1
 }
 
@@ -44,8 +44,11 @@ kafve-dummy-certificates::generate() {
 
     # Generar CA Raíz
     logger::ok "Generando CA Raíz..."
-    openssl req -new -x509 -days ${VALIDITY_DAYS} -passout pass:${PASSWORD} \
-        -keyout "${CERTIFICATE_RUTE}/ca-key" -out "${CERTIFICATE_RUTE}/ca-cert" -subj "/CN=MyRootCA"
+    MSYS_NO_PATHCONV=1 openssl req -new -x509 -days ${VALIDITY_DAYS} \
+    	-passout pass:${PASSWORD} \
+        -keyout "${CERTIFICATE_RUTE}/ca-key" \
+        -out "${CERTIFICATE_RUTE}/ca-cert" \
+        -subj "/CN=MyRootCA"
 
     # Generar Keystore del Broker
     logger::ok "Generando Keystore..."
