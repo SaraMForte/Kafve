@@ -13,20 +13,19 @@ set -o pipefail
 
 # --- ERROR CONTROL --------------------------------------------------------
 
-# @description Limpia y notifica fallos.
-function catch_error() {
-  	local -r line_number="$1"
-  	local -r script_name="${BASH_SOURCE[1]:-$0}"
+# @description Limpia archivos temporales y notifica fallos en el script.
+# @param $1 string Número de línea donde ocurrió el error.
+kafve_commons::catch_error() {
+	local -r line_number="$1"
+	local -r script_name="${BASH_SOURCE[1]:-$0}"
 
-  	logger::err "Error en ${script_name}:${line_number}" >&2
-  	logger::err "Comando fallido: '${BASH_COMMAND}'" >&2
+	logger::err "Error en ${script_name}:${line_number}" >&2
+	logger::err "Comando fallido: '${BASH_COMMAND}'" >&2
 
-	# Funciones de borrado personalizadas dada las funciones
-  	[[ -d "${KAFKA_TEMP_DIR}" ]] && rm -rf "${KAFKA_TEMP_DIR}"
-  	exit 1
+	exit 1
 }
 
-trap 'catch_error $LINENO' ERR
+trap 'kafve_commons::catch_error $LINENO' ERR
 
 # --- FUNCTIONS -----------------------------------------------------------
 
@@ -35,19 +34,19 @@ trap 'catch_error $LINENO' ERR
 # @param $1 string Ruta original a limpiar.
 # @stdout string La ruta saneada y normalizada.
 kafve_commons::normalize_path() {
-	local path="$1"
-	local normalize_path
+	local -r path="$1"
+	local normalized_path
 
-	### Extracción y limpieza de la ruta del log
-    normalize_path=$(echo "$path" | sed -e 's/\r//g' -e 's/^"//' -e 's/"$//' | xargs)
+	### Extracción y limpieza de la ruta del log (usa herestring para evitar pipes innecesarios)
+	normalized_path=$(sed -e 's/\r//g' -e 's/^"//' -e 's/"$//' <<<"${path}" | xargs)
 
 	### Conversión Windows -> Unix
-	if [[ "$OS" == "Windows" ]]; then
-		normalize_path=$(cygpath -u "$normalize_path")
+	if [[ "${OS:-}" == "Windows" ]]; then
+		normalized_path=$(cygpath -u "${normalized_path}")
 	fi
 
 	### Retorna la ruta normalizada
-	echo "$normalize_path"
+	echo "${normalized_path}"
 }
 
 # @description Construye el path al ejecutable de Kafka según el Sistema Operativo.
@@ -56,20 +55,22 @@ kafve_commons::normalize_path() {
 # @param $2 string [Opcional] Directorio base de Kafka (default: ".").
 # @stdout string Path relativo o absoluto al script (.sh o .bat).
 kafve_commons::get_kafka_script() {
-    local script_name="$1"
-    local base_path="${2:-.}"
-    base_path=$(kafve_commons::normalize_path "$base_path")
-    local full_path=""
+	local -r script_name="$1"
+	local -r input_base="${2:-.}"
+	local base_path
+	local full_path=""
 
-    if [[ "$OS" == "Windows" ]]; then
-        full_path="${base_path}/bin/windows/${script_name}.bat"
-    else
-        full_path="${base_path}/bin/${script_name}.sh"
-    fi
+	base_path=$(kafve_commons::normalize_path "${input_base}")
 
-    # Limpiar el path si empieza con ./ para que se vea más estético
-    echo "${full_path}"
+	if [[ "${OS:-}" == "Windows" ]]; then
+		full_path="${base_path}/bin/windows/${script_name}.bat"
+	else
+		full_path="${base_path}/bin/${script_name}.sh"
+	fi
+
+	# Limpiar el path si empieza con ./ para que se vea más estético
+	echo "${full_path}"
 }
 
-# Establece que la librería KAFVE__KAFVE_COMMONS_LOADED
+# Establece que la librería KAFVE__KAFVE_COMMONS_LOADED ha sido cargada
 readonly KAFVE__KAFVE_COMMONS_LOADED=true
