@@ -9,277 +9,282 @@ set -o pipefail
 
 # --- ERROR CONTROL --------------------------------------------------------
 
-# @description Limpia y notifica fallos.
-function catch_error() {
-  	local -r line_number="$1"
-  	local -r script_name="${BASH_SOURCE[1]:-$0}"
+# @description Limpia y notifica fallos en el script.
+# @param $1 string Número de línea donde ocurrió el error.
+broker::catch_error() {
+	local -r line_number="$1"
+	local -r script_name="${BASH_SOURCE[1]:-$0}"
 
-  	logger::err "Error en ${script_name}:${line_number}"
-  	logger::err "Comando fallido: '${BASH_COMMAND}'"
+	logger::err "Error en ${script_name}:${line_number}"
+	logger::err "Comando fallido: '${BASH_COMMAND}'"
 }
 
-trap 'catch_error $LINENO' ERR
+trap 'broker::catch_error $LINENO' ERR
 
 # --- FUNCTIONS -----------------------------------------------------------
-main_broker() {
-    local force_flag=false
 
-    for arg in "$@"; do
-      case "$arg" in
-        -f|--force)
-          force_flag=true
-          break
-          ;;
-      esac
-    done
+# @description Punto de entrada principal para gestionar las acciones del broker de Kafka.
+# @param $@ string Argumentos pasados al script (ej. init, start, stop -f, --force).
+broker::main() {
+	local force_flag=false
 
-    case "$1" in
-        "init")
-            broker_init $force_flag
-            ;;
-        "start")
-            broker_start $force_flag
-            ;;
-        "stop")
-            broker_stop
-            ;;
-        "status")
-            broker_status
-            ;;
-        "info")
-            broker_info
-            ;;
-        *)
-          return 0
-          ;;
-    esac
+	for arg in "$@"; do
+		case "${arg}" in
+		-f | --force)
+			force_flag=true
+			break
+			;;
+		esac
+	done
+
+	case "${1:-}" in
+	"init")
+		broker::init "${force_flag}"
+		;;
+	"start")
+		broker::start "${force_flag}"
+		;;
+	"stop")
+		broker::stop
+		;;
+	"status")
+		broker::status
+		;;
+	"info")
+		broker::info
+		;;
+	*)
+		return 0
+		;;
+	esac
 }
 
-# ------------------------------------------------------------------------------
-# Inicialización y formateo del broker/cluster
-# ------------------------------------------------------------------------------
-broker_init() {
-    logger::run "Iniciando configuración del Broker..."
+# @description Inicializa y formatea el broker o cluster de Apache Kafka.
+# @param $1 string Flag ("true" o "false") que indica si se debe forzar el formateo sobreescribiendo datos antiguos.
+# @return 0 si tuvo éxito, 1 de lo contrario.
+broker::init() {
+	logger::run "Iniciando configuración del Broker..."
 
-	local force_flag="$1"
-    local cluster_id
-    local log_dir
+	local -r force_flag="$1"
+	local cluster_id
+	local log_dir
 
 	### Verifica el estado del broker y lo detiene si está activo
-	if is_broker_running; then
-	    logger::custom "INFO" "Broker detectado en ejecución. Deteniendo para reinicialización..."
-	    broker_stop
+	if broker::is_running; then
+		logger::custom "INFO" "Broker detectado en ejecución. Deteniendo para reinicialización..."
+		broker::stop
 	fi
 
-    ### Busca el directorio de configuración para Kafka
-    if [[ ! -f $(kafve_commons::normalize_path "$KAFVE_KAFKA_CONFIG") ]]; then
-        logger::err "No se encuentra el archivo de configuración en $KAFVE_KAFKA_CONFIG" >&2
-        exit 1
-    fi
+	### Busca el directorio de configuración para Kafka
+	if [[ ! -f "$(kafve_commons::normalize_path "${KAFVE_KAFKA_CONFIG}")" ]]; then
+		logger::err "No se encuentra el archivo de configuración en ${KAFVE_KAFKA_CONFIG}" >&2
+		exit 1
+	fi
 
-    ### Toma el directorio para guardar la metadata del cluster de KAFVE_KAFKA_CONFIG (Por defecto un server.properties)
-    log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | head -n 1 | cut -d'=' -f2)")
+	### Toma el directorio de metadata del cluster de KAFVE_KAFKA_CONFIG (Por defecto un server.properties)
+	log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "${KAFVE_KAFKA_CONFIG}" | head -n 1 | cut -d'=' -f2)")
 
-    ### Verifica y crea si es necesario el directorio .data
-    if [[ -d "$log_dir" ]]; then
-        if [[ "$force_flag" == true ]]; then
-            logger::custom "FORCE" "Limpiando datos existentes en: $log_dir"
-            rm -rf "$log_dir"
-            mkdir -p "$log_dir"
-        else
-            logger::err "El directorio $log_dir ya contiene datos." >&2
-            logger::err "Usa --force si quieres borrar el cluster actual y crear uno nuevo." >&2
-            exit 1
-        fi
-    fi
+	### Verifica y crea si es necesario el directorio .data
+	if [[ -d "${log_dir}" ]]; then
+		if [[ "${force_flag}" == "true" ]]; then
+			logger::custom "FORCE" "Limpiando datos existentes en: ${log_dir}"
+			rm -rf "${log_dir}"
+			mkdir -p "${log_dir}"
+		else
+			logger::err "El directorio ${log_dir} ya contiene datos." >&2
+			logger::err "Usa --force si quieres borrar el cluster actual y crear uno nuevo." >&2
+			exit 1
+		fi
+	fi
 
-    ### Generación de Id de Cluster Kafka
-    cluster_id=$($(kafve_commons::get_kafka_script "kafka-storage" "$KAFVE_KAFKA_DIR") random-uuid)
-    if [[ -z "$cluster_id" ]]; then
-            logger::err "No se pudo generar el Cluster ID" >&2
-            exit 1
-    fi
-    logger::ok "Cluster ID generado: $cluster_id"
+	### Generación de Id de Cluster Kafka
+	cluster_id=$($(kafve_commons::get_kafka_script "kafka-storage" "${KAFVE_KAFKA_DIR}") random-uuid)
+	if [[ -z "${cluster_id}" ]]; then
+		logger::err "No se pudo generar el Cluster ID" >&2
+		exit 1
+	fi
+	logger::ok "Cluster ID generado: ${cluster_id}"
 
-    ### Formateo del almacenamiento en modo standalone
-	if broker_init_run "$cluster_id"; then
+	### Formateo del almacenamiento en modo standalone
+	if broker::init_run "${cluster_id}"; then
 		logger::ok "Almacenamiento formateado en modo standalone."
-        logger::done "Configuración del Broker finalizada."
-        return 0
-    else
-    	logger::err "Se ha producido un error formateando el cluster" >&2
-    	exit 1
+		logger::done "Configuración del Broker finalizada."
+		return 0
+	else
+		logger::err "Se ha producido un error formateando el cluster" >&2
+		exit 1
 	fi
 }
 
-broker_init_run() {
-	local cluster_id="$1"
+# @description Ejecuta el comando interno de Kafka para formatear el almacenamiento.
+# @param $1 string ID único del cluster generado para Kafka.
+broker::init_run() {
+	local -r cluster_id="$1"
 	local script_path
 
-	script_path=$(kafve_commons::get_kafka_script "kafka-storage" "$KAFVE_KAFKA_DIR")
-	"$script_path" format \
-       --standalone \
-       -t "$cluster_id" \
-       -c "$KAFVE_KAFKA_CONFIG"
+	script_path=$(kafve_commons::get_kafka_script "kafka-storage" "${KAFVE_KAFKA_DIR}")
+	"${script_path}" format \
+		--standalone \
+		-t "${cluster_id}" \
+		-c "${KAFVE_KAFKA_CONFIG}"
 }
 
-# ------------------------------------------------------------------------------
-# Arranque del broker
-# ------------------------------------------------------------------------------
-broker_start() {
-	local force_flag="$1"
+# @description Arranca el proceso del broker de Kafka.
+# @param $1 string Flag ("true" o "false") para forzar la inicialización si no existe el directorio de logs.
+broker::start() {
+	local -r force_flag="$1"
+	local log_dir
 
-    logger::run "Inicializando Broker..."
+	logger::run "Inicializando Broker..."
 
 	### Comprueba si existe la carpeta para los logs, especificado en el server.properties
-    log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | head -n 1 | cut -d'=' -f2)")
-    if [[ ! -d "$log_dir" || "$force_flag" == true ]]; then
-        broker_init "$force_flag"
-    fi
+	log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "${KAFVE_KAFKA_CONFIG}" | head -n 1 | cut -d'=' -f2)")
+	if [[ ! -d "${log_dir}" || "${force_flag}" == "true" ]]; then
+		broker::init "${force_flag}"
+	fi
 
 	### Comprueba si ya hay un broker inicializado
-    if is_broker_running; then
-      logger::custom "SKIP" "El Broker ya está en ejecución."
-      exit 0
-    fi
+	if broker::is_running; then
+		logger::custom "SKIP" "El Broker ya está en ejecución."
+		exit 0
+	fi
 
 	### Ejecuta el script de inicio del servidor Kafka en segundo plano
-    broker_start_run
+	broker::start_run
 
 	### Espera unos segundos y verifica si el proceso se mantiene activo
 	logger::custom "WAIT" "Verificando inicialización del proceso (esperando 2s)..."
 	sleep 2
-	if ! is_broker_running; then
-      logger::err "El Broker no ha podido inicializarse correctamente" >&2
-    fi
+	if ! broker::is_running; then
+		logger::err "El Broker no ha podido inicializarse correctamente" >&2
+	fi
 
-    logger::done "Se ha inicializado el broker"
+	logger::done "Se ha inicializado el broker"
 }
 
-broker_start_run() {
+# @description Lanza el ejecutable de Kafka en segundo plano dependiendo del sistema operativo.
+broker::start_run() {
 	local script_path
-	script_path=$(kafve_commons::get_kafka_script "kafka-server-start" "$KAFVE_KAFKA_DIR")
+	local broker_pid
+	script_path=$(kafve_commons::get_kafka_script "kafka-server-start" "${KAFVE_KAFKA_DIR}")
 
-	if [[ ${OS} == "Windows" ]]; then
-		nohup "${script_path}" "$KAFVE_KAFKA_CONFIG" > /dev/null 2>&1 & local broker_pid=$!
+	if [[ "${OS:-}" == "Windows" ]]; then
+		nohup "${script_path}" "${KAFVE_KAFKA_CONFIG}" >/dev/null 2>&1 &
+		broker_pid=$!
 		logger::ok "Broker inicializado con el PID: ${broker_pid}"
 	else
-		$script_path -daemon config/server.properties & local broker_pid=$!
+		"${script_path}" -daemon config/server.properties &
+		broker_pid=$!
 		logger::ok "Broker inicializado con el PID: ${broker_pid}"
 	fi
 }
 
-# ------------------------------------------------------------------------------
-# Parada del broker
-# ------------------------------------------------------------------------------
-broker_stop() {
-    logger::run "Deteniendo Broker..."
+# @description Detiene de forma ordenada (y forzada si es necesario) el proceso de Kafka.
+broker::stop() {
+	logger::run "Deteniendo Broker..."
 
-    ### Señal de parada oficial del broker
-    "$(kafve_commons::get_kafka_script "kafka-server-stop" "$KAFVE_KAFKA_DIR")"
-    logger::custom "TASK" "Enviada señal de parada oficial"
+	### Señal de parada oficial del broker
+	kafve_commons::get_kafka_script "kafka-server-stop" "${KAFVE_KAFKA_DIR}"
+	logger::custom "TASK" "Enviada señal de parada oficial"
 
-    logger::custom "WAIT" "Esperando finalización del proceso de parada del broker"
-    sleep 3
+	logger::custom "WAIT" "Esperando finalización del proceso de parada del broker"
+	sleep 3
 
-    ### Verificación de parada del broker
-    if jps | grep -q "Kafka"; then
-        # Parada forzada del broker
-        logger::custom "FORCE" "El proceso no cerró a tiempo, forzando..."
-        pkill -15 -f "kafka.Kafka"
-        logger::ok "Proceso finalizado por fuerza (SIGTERM)"
-    else
-        logger::ok "El script oficial cerró el Broker correctamente"
-    fi
-
-    logger::done "Procedimiento completado."
-}
-
-# ------------------------------------------------------------------------------
-# Tabla de visualización de estado del broker
-# ------------------------------------------------------------------------------
-broker_status() {
-    logger::run "Consultando estado del Broker..."
-
-	if ! is_broker_running; then
-	    logger::err "El Broker no se encuentra activo." >&2
-	    exit 1
+	### Verificación de parada del broker
+	if jps | grep -q "Kafka"; then
+		# Parada forzada del broker
+		logger::custom "FORCE" "El proceso no cerró a tiempo, forzando..."
+		pkill -15 -f "kafka.Kafka"
+		logger::ok "Proceso finalizado por fuerza (SIGTERM)"
+	else
+		logger::ok "El script oficial cerró el Broker correctamente"
 	fi
 
-    echo "------------------------------------------------------------------------------------"
-    printf "| %-8s | %-6s | %-60s |\n" "PID" "ESTADO" "CLUSTER ID (UUID)"
-    echo "------------------------------------------------------------------------------------"
-
-    # shellcheck disable=SC2009
-    ps -ef | grep -i "kafka.kafka" | while read -r line; do
-        print_broker_status_row "$line"
-    done
-    echo "------------------------------------------------------------------------------------"
-
-    logger::done "Consulta de estado finalizada."
+	logger::done "Procedimiento completado."
 }
 
-print_broker_status_row() {
-    local line="$1"
-    local label_pid
-    local label_cluster_id="Unknown"
+# @description Muestra una tabla por consola con el estado actual, PID y Cluster ID del Broker.
+broker::status() {
+	logger::run "Consultando estado del Broker..."
 
-    label_pid=$(echo "$line" | awk '{print $2}')
+	if ! broker::is_running; then
+		logger::err "El Broker no se encuentra activo." >&2
+		exit 1
+	fi
 
-    local log_dir
-    log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "$KAFVE_KAFKA_CONFIG" | head -n 1 | cut -d'=' -f2)")
-    if [[ -f "$log_dir/meta.properties" ]]; then
-        label_cluster_id=$(grep "cluster.id" "$log_dir/meta.properties" | cut -d'=' -f2 | tr -d '\r')
-    fi
+	echo "------------------------------------------------------------------------------------"
+	printf "| %-8s | %-6s | %-60s |\n" "PID" "ESTADO" "CLUSTER ID (UUID)"
+	echo "------------------------------------------------------------------------------------"
 
-    printf "| %-8s | %-6s | %-60s |\n" "$label_pid" "OK" "$label_cluster_id"
+	# shellcheck disable=SC2009
+	ps -ef | grep -i "kafka.kafka" | while read -r line; do
+		broker::print_status_row "${line}"
+	done
+	echo "------------------------------------------------------------------------------------"
+
+	logger::done "Consulta de estado finalizada."
 }
 
-# ------------------------------------------------------------------------------
-# Visor del log del broker
-# ------------------------------------------------------------------------------
-broker_info() {
-    logger::run "Abriendo visor de logs para broker en tiempo real..."
+# @description Procesa e imprime una fila de la tabla de estados para un proceso Kafka detectado.
+# @param $1 string Línea cruda extraída del comando `ps` para el proceso de Kafka.
+broker::print_status_row() {
+	local -r line="$1"
+	local label_pid
+	local label_cluster_id="Unknown"
+	local log_dir
+
+	label_pid=$(echo "${line}" | awk '{print $2}')
+	log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "${KAFVE_KAFKA_CONFIG}" | head -n 1 | cut -d'=' -f2)")
+
+	if [[ -f "${log_dir}/meta.properties" ]]; then
+		label_cluster_id=$(grep "cluster.id" "${log_dir}/meta.properties" | cut -d'=' -f2 | tr -d '\r')
+	fi
+
+	printf "| %-8s | %-6s | %-60s |\n" "${label_pid}" "OK" "${label_cluster_id}"
+}
+
+# @description Muestra el visor de logs (tail -f) en tiempo real para el archivo server.log de Kafka.
+broker::info() {
+	logger::run "Abriendo visor de logs para broker en tiempo real..."
+
+	local -r log_file="${KAFVE_KAFKA_DIR}/logs/server.log"
 
 	### Comprueba si existe archivo de log
-    local log_file="${KAFVE_KAFKA_DIR}/logs/server.log"
-    if [[ ! -f "$log_file" ]]; then
-        logger::err "No se encuentra el archivo en: $log_file" >&2
-        return 1
-    fi
+	if [[ ! -f "${log_file}" ]]; then
+		logger::err "No se encuentra el archivo en: ${log_file}" >&2
+		return 1
+	fi
 
-    ### Comprueba si existen brokers activos
-    if ! is_broker_running; then
-        logger::err "El Broker no se encuentra activo." >&2
-        exit 1
-    fi
+	### Comprueba si existen brokers activos
+	if ! broker::is_running; then
+		logger::err "El Broker no se encuentra activo." >&2
+		exit 1
+	fi
 
 	### info para salir
-    logger::custom "INFO" "Presiona CTRL+C para salir."
-    echo "--------------------------------------------------"
+	logger::custom "INFO" "Presiona CTRL+C para salir."
+	echo "--------------------------------------------------"
 
-    ### Entra al visor de logs del broker
-    trap 'echo ""; logger::done "Has salido del visor de logs del broker"; trap - INT; return 0' INT
-    tail -f "${log_file}" || true
+	### Entra al visor de logs del broker y maneja la interrupción limpia con el trap local
+	trap 'echo ""; logger::done "Has salido del visor de logs del broker"; trap - INT; return 0' INT
+	tail -f "${log_file}" || true
 
-    ### Limpiamos la trap al salir para no afectar al resto del script
-    trap - INT
+	### Limpiamos la trap al salir para no afectar al resto del script
+	trap - INT
 }
 
-# Verifica si el proceso de Kafka está activo mediante jps
-# Retorna 0 (true) si se encuentra 'kafka.kafka', 1 (false) en caso contrario
-is_broker_running() {
-    jps -l | grep -iq "kafka.kafka"
+# @description Verifica si el proceso de Kafka está activo mediante jps.
+# @return 0 si se encuentra activo, 1 en caso contrario.
+broker::is_running() {
+	jps -l | grep -iq "kafka.kafka"
 }
 
-################################################################################
-#                               MAIN RUN                                       #
-################################################################################
+# --- Main run -----------------------------------------------------------
 if [[ -f "$(dirname "$0")/kafve-commons" ]]; then
-    source "$(dirname "$0")/kafve-commons"
+	source "$(dirname "$0")/kafve-commons"
 else
-    logger::err "No se encontró '$(dirname "$0")'/kafve-commons. Abortando." >&2
-    exit 1
+	logger::err "No se encontró '$(dirname "$0")'/kafve-commons. Abortando." >&2
+	exit 1
 fi
 
-main_broker "$@"
+broker::main "$@"
