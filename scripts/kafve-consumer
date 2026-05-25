@@ -1,223 +1,230 @@
 #!/usr/bin/env bash
 
-################################################################################
-#                                  VARS                                        #
-################################################################################
+# --- VARS -------------------------------------------------------------------------------------------------------------
 readonly KAFKA_CONSUMER_CLASS="org.apache.kafka.tools.consumer.ConsoleConsumer"
 
-################################################################################
-#                                MAIN RUN                                      #
-################################################################################
-main_consumer() {
+# --- FUNCTIONS --------------------------------------------------------------------------------------------------------
+
+# @description Punto de entrada principal para gestionar las acciones de los consumidores de Kafka.
+# @param $@ string Argumentos pasados al script (ej: start, stop, -t, --topic mi_topic).
+consumer::main() {
 	local command=""
 	local topic="SOMETHING"
 
 	### Procesado de argumentos
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-			start)
-                command="start"
-                shift
-                ;;
-			stop)
-                command="stop"
-                shift
-                ;;
-			info)
-                command="info"
-                shift
-                ;;
-			status)
-                command="status"
-                shift
-                ;;
-			-t|--topic)
-				topic="$2"
-				shift 2
-				;;
-			*)
-				echo "[SKIP] ./kafve consumer <comando> [argumentos]"
-				return 0
-				;;
+		start)
+			command="start"
+			shift
+			;;
+		stop)
+			command="stop"
+			shift
+			;;
+		info)
+			command="info"
+			shift
+			;;
+		status)
+			command="status"
+			shift
+			;;
+		-t | --topic)
+			topic="${2:-}"
+			shift 2
+			;;
+		*)
+			echo "[SKIP] ./kafve consumer <comando> [argumentos]"
+			return 0
+			;;
 		esac
-    done
+	done
 
 	### Delegación de comandos
-    case "$command" in
-        "start")
-            consumer_start "$topic"
-            ;;
-		"stop") # TODO: Implementar --all
-			consumer_stop "$topic"
-			;;
-		"info")
-			consumer_info "$topic"
-			;;
-		"status") # TODO: Que tire error si no hay nada
-			consumer_status
-			;;
-        *)
-        	return 1
-        	;;
-    esac
+	case "${command}" in
+	"start")
+		consumer::start "${topic}"
+		;;
+	"stop") # TODO: Implementar --all
+		consumer::stop "${topic}"
+		;;
+	"info")
+		consumer::info "${topic}"
+		;;
+	"status") # TODO: Que tire error si no hay nada
+		consumer::status
+		;;
+	*)
+		return 1
+		;;
+	esac
 }
 
-consumer_start() {
-    local topic="$1"
-    local KAFVE_LOG_DIR="log"
-    local log_file=${KAFVE_LOG_DIR}/consumer-$topic.log
+# @description Inicializa un consumidor de Kafka en segundo plano y redirige su salida a un archivo de log.
+# @param $1 string Nombre del tópico a consumir.
+consumer::start() {
+	local -r topic="$1"
+	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+	local consumer_pid
 
-    echo "[RUN] Inicializando consumidor para el tópico: $topic"
+	echo "[RUN] Inicializando consumidor para el tópico: ${topic}"
 
 	### Comprueba si ya se ha arrancado un consumer en el tópico
-    if is_consumer_running "$topic"; then
-    	echo "[ERROR] Ya existe un consumer para el tópico: $topic"
-    	exit 0
-    fi
-
-	### Comprueba si existe una carpeta de logs, sino la  crea
-	if [[ ! -d "$KAFVE_LOG_DIR" ]]; then
-	   mkdir -p "$KAFVE_LOG_DIR"
-	   echo " -[OK] Carpeta de logs '$KAFVE_LOG_DIR' creada correctamente."
+	if consumer::is_running "${topic}"; then
+		echo "[ERROR] Ya existe un consumer para el tópico: ${topic}"
+		exit 0
 	fi
 
-	### Comprueba si se ha quedado un consumer.log y hay que borrarlo
-	if [[ -f "$log_file" ]]; then
-		rm -f "$log_file"
+	### Comprueba si existe una carpeta de logs, sino la crea
+	if [[ ! -d "${KAFVE_LOG_DIR}" ]]; then
+		mkdir -p "${KAFVE_LOG_DIR}"
+		echo " -[OK] Carpeta de logs '${KAFVE_LOG_DIR}' creada correctamente."
+	fi
+
+	### Comprueba si se ha quedado un consumer.log residual y lo elimina
+	if [[ -f "${log_file}" ]]; then
+		rm -f "${log_file}"
 		echo " -[OK] Borrado archivo residual del anterior consumer del mismo tópico"
 	fi
 
-	### Inicializa el consumer y externaliza la salida a log/consumer.log
-	exec -a "kafve_consumer_{$topic}" \
-    	"${KAFVE_KAFKA_DIR}/bin/kafka-console-consumer.sh" \
-    	--consumer.config "$KAFVE_KAFKA_CONSUMER_CONFIG" \
-    	--topic "$topic" \
-    	--from-beginning \
-    	--property print.key=true \
-        --property key.separator=" | " \
-    	--bootstrap-server "$KAFVE_BROKER_URL" \
-    	> "$log_file" 2>&1 &
-    local consumer_pid=$!
+	### Inicializa el consumer en segundo plano
+	exec -a "kafve_consumer_{${topic}}" \
+		"${KAFVE_KAFKA_DIR}/bin/kafka-console-consumer.sh" \
+		--consumer.config "${KAFVE_KAFKA_CONSUMER_CONFIG}" \
+		--topic "${topic}" \
+		--from-beginning \
+		--property print.key=true \
+		--property key.separator=" | " \
+		--bootstrap-server "${KAFVE_BROKER_URL}" \
+		>"${log_file}" 2>&1 &
+	consumer_pid=$!
 
 	### Comprueba que se ha inicializado correctamente
-    sleep 1
-    if ps -p $consumer_pid > /dev/null; then
-       echo "[DONE] Consumidor del tópico '$topic' iniciado en segundo plano."
-       echo "[DONE] Logs disponibles en: $log_file (PID: $consumer_pid)"
-       return 0
-    else
-       echo "[ERROR] El consumidor falló al arrancar. Revisa $log_file para más detalles."
-       return 1
-    fi
+	sleep 1
+	if ps -p "${consumer_pid}" >/dev/null; then
+		echo "[DONE] Consumidor del tópico '${topic}' iniciado en segundo plano."
+		echo "[DONE] Logs disponibles en: ${log_file} (PID: ${consumer_pid})"
+		return 0
+	else
+		echo "[ERROR] El consumidor falló al arrancar. Revisa ${log_file} para más detalles."
+		return 1
+	fi
 }
 
-consumer_info() {
-	local topic="$1"
-    local KAFVE_LOG_DIR="log"
-    local log_file=${KAFVE_LOG_DIR}/consumer-$topic.log
+# @description Abre el visor de logs en tiempo real para un consumidor específico.
+# @param $1 string Nombre del tópico.
+consumer::info() {
+	local -r topic="$1"
+	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
 
 	echo "[RUN] Abriendo visor de logs para el consumer en tiempo real..."
 
-	### Comprueba si esta arrancado el consumer para el topic
-    if ! is_consumer_running "$topic"; then
-    	echo "[ERROR] No existe un consumer para el tópico: $topic"
-    	exit 0
-    fi
+	### Comprueba si está arrancado el consumer para el topic
+	if ! consumer::is_running "${topic}"; then
+		echo "[ERROR] No existe un consumer para el tópico: ${topic}"
+		exit 0
+	fi
 
 	### Comprueba si existe el log para visualizar
-    if [[ ! -f "$log_file" ]]; then
-    	echo " -[ERROR] No se ha encontrado el archivo de log: $log_file"
-    fi
+	if [[ ! -f "${log_file}" ]]; then
+		echo " -[ERROR] No se ha encontrado el archivo de log: ${log_file}"
+		return 1
+	fi
 
-   	trap 'echo -e "\n[DONE] Has salido del visor de logs del consumer"; return' INT
-    tail -f "$log_file"
+	trap 'echo -e "\n[DONE] Has salido del visor de logs del consumer"; trap - INT; return' INT
+	tail -f "${log_file}"
 
-    ### Limpiamos la trap al salir para no afectar al resto del script
-    trap - INT
+	### Limpiamos la trap al salir para no afectar al resto del script
+	trap - INT
 }
 
-is_consumer_running() {
-	local topic="$1"
+# @description Detiene de forma ordenada o forzada el consumidor asignado a un tópico.
+# @param $1 string Nombre del tópico.
+consumer::stop() {
+	local -r topic="$1"
+	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+	local pid
 
+	echo "[RUN] Deteniendo consumidor del tópico '${topic}'"
+
+	### Buscamos el pid del consumer para el tópico (Se quitó el redireccionamiento incorrecto del subshell)
 	# shellcheck disable=SC2009
-	ps -ef | \
-    	grep -e "--topic $topic" | \
-    	grep $KAFKA_CONSUMER_CLASS \
-    	> /dev/null 2>&1
-}
-
-consumer_stop() {
-    local topic="$1"
-    local KAFVE_LOG_DIR="log"
-    local log_file=${KAFVE_LOG_DIR}/consumer-$topic.log
-
-    echo "[RUN] Deteniendo consumidor del tópico '$topic'"
-
-	### Buscamos el pid del consumer para el tópico pasado
-    local pid
-    # shellcheck disable=SC2009
-    pid=$(ps -ef | \
-    	grep -e "--topic $topic" | \
-    	grep $KAFKA_CONSUMER_CLASS \
-        > /dev/null 2>&1
-    )
+	pid=$(ps -ef | grep -e "--topic ${topic}" | grep "${KAFKA_CONSUMER_CLASS}" | awk '{print $2}')
 
 	# Mata el proceso con el pid encontrado para ese tópico
-    if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
+	if [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ ]]; then
+		kill "${pid}"
 
-        kill "$pid"
+		### Verificamos si realmente murió
+		sleep 2
+		if ps -p "${pid}" >/dev/null 2>&1; then
+			echo " -[WARN] No cerró a tiempo, forzando parada..."
+			kill -9 "${pid}"
+			echo " -[OK] Consumidor detenido forzando la parada."
+		fi
 
-        ### Verificamos si realmente murió
-        sleep 2
-        if ps -p "$pid" > /dev/null 2>&1; then
-            echo " -[WARN] No cerró a tiempo, forzando parada..."
-            kill -9 "$pid"
-            echo " -[OK] Consumidor detenido forzando la parada."
-        fi
+		### Elimina el archivo de log como parte del proceso de parada y limpieza
+		if [[ -f "${log_file}" ]]; then
+			rm -f "${log_file}"
+			echo " -[OK] Borrado archivo de log del consumer"
+		fi
 
-        ### Elimina el archivo de log como parte del proceso de parada y limpieza del consumer anterior
-        if [[ -f "$log_file" ]]; then
-            rm -f "$log_file"
-            echo " -[OK] Borrado archivo de log del consumer"
-        fi
-
-        echo "[DONE] Consumidor detenido."
-        return 0
-    else
-        echo "[ERROR] No se encontró ningún consumidor activo para el tópico '$topic'."
-        return 1
-    fi
+		echo "[DONE] Consumidor detenido."
+		return 0
+	else
+		echo "[ERROR] No se encontró ningún consumidor activo para el tópico '${topic}'."
+		return 1
+	fi
 }
 
-consumer_status() {
+# @description Muestra por pantalla una tabla con todos los consumidores de Kafka activos.
+consumer::status() {
 	echo "[RUN] Consultando estado de los Consumers..."
 
-    ### Imprimimos en pantalla los consumers activos
 	echo "-------------------------------------------------------------------------------------------"
-    printf "| %-8s | %-22s | %-8s | %-40s |\n" "PID" "TOPIC" "TIME" "BROKER URL"
-    echo "-------------------------------------------------------------------------------------------"
-    # shellcheck disable=SC2009
-    ps -ef | grep $KAFKA_CONSUMER_CLASS | grep -v "grep" | while read -r line; do
-    	print_consumer_status_row "$line"
-    done
-    echo "-------------------------------------------------------------------------------------------"
+	printf "| %-8s | %-22s | %-8s | %-40s |\n" "PID" "TOPIC" "TIME" "BROKER URL"
+	echo "-------------------------------------------------------------------------------------------"
 
-    echo "[DONE] Consulta de estado finalizada."
+	# shellcheck disable=SC2009
+	ps -ef | grep "${KAFKA_CONSUMER_CLASS}" | grep -v "grep" | while read -r line; do
+		consumer::print_status_row "${line}"
+	done
+	echo "-------------------------------------------------------------------------------------------"
+
+	echo "[DONE] Consulta de estado finalizada."
 }
 
-print_consumer_status_row() {
-	local line="$1"
+# @description Procesa una línea de comando de proceso de consumidor y la imprime formateada en la tabla.
+# @param $1 string Línea de salida de comando ps.
+consumer::print_status_row() {
+	local -r line="$1"
 	local label_pid label_time label_topic label_broker_url
 
-	label_pid=$(echo "$line" | awk '{print $2}')
-	label_time=$(echo "$line" | awk '{print $7}')
-	label_topic=$(echo "$line" | awk -F'--topic ' '{print $2}' | awk '{print $1}')
-	label_broker_url=$(echo "$line" | awk -F'--bootstrap-server ' '{print $2}' | awk '{print $1}')
+	label_pid=$(echo "${line}" | awk '{print $2}')
+	label_time=$(echo "${line}" | awk '{print $7}')
+	label_topic=$(echo "${line}" | awk -F'--topic ' '{print $2}' | awk '{print $1}')
+	label_broker_url=$(echo "${line}" | awk -F'--bootstrap-server ' '{print $2}' | awk '{print $1}')
 
-	printf "| %-8s | %-22s | %-8s | %-40s |\n" "$label_pid" "$label_topic" "$label_time" "$label_broker_url"
+	printf "| %-8s | %-22s | %-8s | %-40s |\n" "${label_pid}" "${label_topic}" "${label_time}" "${label_broker_url}"
+}
+
+# @description Comprueba si un consumidor específico de un tópico está activo en el sistema.
+# @param $1 string Nombre del tópico.
+# @return 0 si se está ejecutando, 1 en caso contrario.
+consumer::is_running() {
+	local -r topic="$1"
+
+	if [[ "${OS:-Linux}" != "Windows" ]]; then
+		# shellcheck disable=SC2009
+		ps -ef | grep -e "--topic ${topic}" | grep -q "${KAFKA_CONSUMER_CLASS}"
+	else
+		# En Windows, la detección de procesos es limitada sin WSL
+		return 1
+	fi
 }
 
 ################################################################################
 #                               MAIN RUN                                       #
 ################################################################################
-main_consumer "$@"
+consumer::main "$@"
