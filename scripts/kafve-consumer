@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # --- CONFIG --------------------------------------------------------
 source "./scripts/logger"
+source "./scripts/kafve-commons"
 
 set -o errexit
 set -o errtrace
@@ -45,8 +46,8 @@ consumer::main() {
 			command="stop"
 			shift
 			;;
-		info)
-			command="info"
+		logs)
+			command="logs"
 			shift
 			;;
 		status)
@@ -72,8 +73,8 @@ consumer::main() {
 	"stop") # TODO: Implementar --all
 		consumer::stop "${topic}"
 		;;
-	"info")
-		consumer::info "${topic}"
+	"logs")
+		consumer::logs "${topic}"
 		;;
 	"status") # TODO: Que tire error si no hay nada
 		consumer::status
@@ -89,14 +90,13 @@ consumer::main() {
 consumer::start() {
 	local -r topic="$1"
 	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
-	local consumer_pid
 
 	logger::run "Inicializando consumidor para el tópico: ${topic}"
 
 	### Comprueba si ya se ha arrancado un consumer en el tópico
 	if consumer::is_running "${topic}"; then
-		logger::err "Ya existe un consumer para el tópico: ${topic}"
-		exit 0
+		logger::warn "Ya existe un consumer para el tópico: ${topic}"
+		return 0
 	fi
 
 	### Comprueba si existe una carpeta de logs, sino la crea
@@ -111,17 +111,8 @@ consumer::start() {
 		logger::ok "Borrado archivo residual del anterior consumer del mismo tópico"
 	fi
 
-	### Inicializa el consumer en segundo plano
-	exec -a "kafve_consumer_{${topic}}" \
-		"${KAFVE_KAFKA_DIR}/bin/kafka-console-consumer.sh" \
-		--consumer.config "${KAFVE_KAFKA_CONSUMER_CONFIG}" \
-		--topic "${topic}" \
-		--from-beginning \
-		--property print.key=true \
-		--property key.separator=" | " \
-		--bootstrap-server "${KAFVE_BROKER_URL}" \
-		>"${log_file}" 2>&1 &
-	consumer_pid=$!
+	### Inicializa el consumer delegando en la función secundaria
+	consumer_pid=$(consumer::start_run "${topic}" "${log_file}")
 
 	### Comprueba que se ha inicializado correctamente
 	sleep 1
@@ -135,9 +126,34 @@ consumer::start() {
 	fi
 }
 
+# @description Lanza el binario del consumidor de Kafka en segundo plano.
+# @param $1 string Nombre del tópico.
+# @param $2 string Ruta al archivo de log donde volcar la salida.
+# @stdout string Devuelve el PID del proceso generado.
+consumer::start_run() {
+	local -r topic="$1"
+	local -r log_file="$2"
+	local -r script_path=$(kafve_commons::get_kafka_script "kafka-console-consumer" "${KAFVE_KAFKA_DIR:-.}")
+	local consumer_pid
+
+	### Inicializa el consumer en segundo plano
+	"${script_path}" \
+		--consumer.config "${KAFVE_KAFKA_CONSUMER_CONFIG}" \
+		--topic "${topic}" \
+		--from-beginning \
+		--property print.key=true \
+		--property key.separator=" | " \
+		--bootstrap-server "${KAFVE_BROKER_URL}" \
+		>"${log_file}" 2>&1 &
+	# Guarda el PID real de consumer
+	consumer_pid=$!
+
+	echo "${consumer_pid}"
+}
+
 # @description Abre el visor de logs en tiempo real para un consumidor específico.
 # @param $1 string Nombre del tópico.
-consumer::info() {
+consumer::logs() {
 	local -r topic="$1"
 	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
 
