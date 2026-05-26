@@ -13,13 +13,13 @@ set -o pipefail
 # @description Limpia y notifica fallos.
 # shellcheck disable=SC2317
 function catch_error() {
-  	local -r line_number="$1"
-  	local -r script_name="${BASH_SOURCE[1]:-$0}"
-  	local -r func_name="${FUNCNAME[1]:-main}"
+	local -r line_number="$1"
+	local -r script_name="${BASH_SOURCE[1]:-$0}"
+	local -r func_name="${FUNCNAME[1]:-main}"
 
-  	logger::err "Error en ${script_name}:${line_number}"
-  	logger::err "Función: ${func_name}()"
-  	logger::err "Comando fallido: '${BASH_COMMAND}'"
+	logger::err "Error en ${script_name}:${line_number}"
+	logger::err "Función: ${func_name}()"
+	logger::err "Comando fallido: '${BASH_COMMAND}'"
 }
 
 trap 'catch_error $LINENO' ERR
@@ -28,74 +28,78 @@ trap 'catch_error $LINENO' ERR
 
 # @description Preparación del entorno y carga de configuración
 init_configuration() {
-  	# shellcheck disable=SC2155
-  	local os_name=$(uname -s)
-  	local kafve_config_file="./config/kafve.conf"
+	# shellcheck disable=SC2155
+	local os_name=$(uname -s)
+	local kafve_config_file="./config/kafve.conf"
 
 	# TODO: Implementar soporte para win
 	case "$os_name" in
-	    Linux*)
-	    	OS="Linux";;
-	    Darwin*)
-	    	OS="Mac";;
-	    CYGWIN*|MINGW*|MSYS*)
-	    	OS="Windows";;
-	    *)
-	    	OS="Desconocido"
+	Linux*)
+		OS="Linux"
+		;;
+	Darwin*)
+		OS="Mac"
+		;;
+	CYGWIN* | MINGW* | MSYS*)
+		OS="Windows"
+		;;
+	*)
+		OS="Desconocido"
+		;;
 	esac
 	export OS
 
 	if [ -f "$kafve_config_file" ]; then
-	    set -a
-	      # shellcheck disable=SC1090
-	      source "${kafve_config_file}"
-	    set +a
-	    echo "-- ${KAFVE_NAME} v${KAFVE_VERSION} (${KAFVE_ENVIRONMENT}) [${OS}] --"
-	    return 0
+		set -a
+		# shellcheck disable=SC1090
+		source "${kafve_config_file}"
+		set +a
+		echo "-- ${KAFVE_NAME} v${KAFVE_VERSION} (${KAFVE_ENVIRONMENT}) [${OS}] --"
+		return 0
 	else
-	    logger::err "No se encontró el archivo 'kafve.conf'."
-	    exit 1
+		logger::err "No se encontró el archivo 'kafve.conf'."
+		exit 1
 	fi
 }
 
 # @description Punto de entrada principal
 main() {
-    if [ -z "$1" ]; then
-        print_help
-    fi
+	if [ -z "$1" ]; then
+		print_help
+	fi
 
-    case "$1" in
-        "help"|"-h"|"--help")
-            print_help
-            ;;
-        "install")
-            ./scripts/kafve-install
-            ./scripts/kafve-dummy-certs generate
-            ;;
-        "uninstall")
-            ./scripts/kafve-uninstall
-            ;;
-        "broker")
-            shift
-            ./scripts/kafve-broker "$@"
-            ;;
-        "producer")
-        	shift
-        	./scripts/kafve-producer "$@"
-        	;;
-     	"consumer")
-     		shift
-     		./scripts/kafve-consumer "$@"
-     		;;
-        *)
-            print_help
-            ;;
-    esac
+	case "$1" in
+	"help" | "-h" | "--help")
+		print_help
+		;;
+	"install")
+		./scripts/kafve-install
+		./scripts/kafve-dummy-certs generate
+		;;
+	"uninstall")
+		./scripts/kafve-uninstall
+		;;
+	"broker")
+		shift
+		./scripts/kafve-broker "$@"
+		;;
+	"producer")
+		shift
+		./scripts/kafve-producer "$@"
+		;;
+	"consumer")
+		shift
+		./scripts/kafve-consumer "$@"
+		;;
+	*)
+		print_help
+		;;
+	esac
 }
-
+# TODO: Cambiar el apartado del consumer para que no sea info sino logs y para el resto también
 # @description Guía de uso y acciones disponibles
 print_help() {
-    echo '
+	echo '
 Uso:
     ./kafve <comando> [acción] [opciones]
 
@@ -112,7 +116,7 @@ Broker (Gestión del nodo Kafka):
         start           Levanta el broker en modo daemon (fondo).
         stop            Detiene el proceso de forma segura (Graceful shutdown).
         status          Muestra una tabla con los procesos y PIDs activos.
-        info            Muestra los logs del servidor en tiempo real (tail -f).
+        logs            Muestra los logs del servidor en tiempo real (tail -f).
 
     Descripción de Acciones:
         init    Prepara los directorios de datos. Si no se especifica el ID,
@@ -159,30 +163,30 @@ Consumer (Gestión de consumo de mensajes):
     Acciones:
         start <-t tópico>    Inicia un consumidor para un tópico específico.
         stop <-t tópico>     Detiene un consumidor para un tópico específico.
-        info <-t tópico>     Muestra los logs del consumidor en tiempo real.
+        logs <-t tópico>     Muestra los logs del consumidor en tiempo real.
         status               Lista todos los consumidores activos.
 
     Descripción de Acciones:
         start   Inicializa un consumidor en segundo plano para el tópico indicado.
                 Crea logs en log/consumer-<tópico>.log y verifica que arranque correctamente.
         stop    Detiene el consumidor del tópico especificado, eliminando logs residuales.
-        info    Abre un visor en tiempo real de los logs del consumidor (tail -f).
+        logs    Abre un visor en tiempo real de los logs del consumidor (tail -f).
         status  Muestra una tabla con PID, tópico, tiempo y URL del broker de consumidores activos.
 
     Opciones:
-        -t, --topic     Nombre del tópico (Obligatorio para start, stop e info).
+        -t, --topic     Nombre del tópico (Obligatorio para start, stop e logs).
 
     Ejemplos:
         ./kafve consumer start -t Example
         ./kafve consumer stop -t Example
-        ./kafve consumer info -t Example
+        ./kafve consumer logs -t Example
         ./kafve consumer status
 
 
 Configuración:
     Requiere un archivo "kafve.conf" en el directorio ./config.
 '
-  exit 0
+	exit 0
 }
 
 # --- MAIN -----------------------------------------------------------

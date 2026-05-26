@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # --- CONFIG --------------------------------------------------------
 source "./scripts/logger"
+source "./scripts/kafve-commons"
 
 set -o errexit
 set -o errtrace
@@ -50,8 +51,8 @@ broker::main() {
 	"status")
 		broker::status
 		;;
-	"info")
-		broker::info
+	"logs")
+		broker::logs
 		;;
 	*)
 		return 0
@@ -244,7 +245,7 @@ broker::print_status_row() {
 }
 
 # @description Muestra el visor de logs (tail -f) en tiempo real para el archivo server.log de Kafka.
-broker::info() {
+broker::logs() {
 	logger::run "Abriendo visor de logs para broker en tiempo real..."
 
 	local -r log_file="${KAFVE_KAFKA_DIR}/logs/server.log"
@@ -280,11 +281,4 @@ broker::is_running() {
 }
 
 # --- Main run -----------------------------------------------------------
-if [[ -f "$(dirname "$0")/kafve-commons" ]]; then
-	source "$(dirname "$0")/kafve-commons"
-else
-	logger::err "No se encontró '$(dirname "$0")'/kafve-commons. Abortando." >&2
-	exit 1
-fi
-
 broker::main "$@"
