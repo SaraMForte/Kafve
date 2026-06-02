@@ -159,12 +159,6 @@ consumer::logs() {
 
 	logger::run "Abriendo visor de logs para el consumer en tiempo real..."
 
-	### Comprueba si está arrancado el consumer para el topic
-	if ! consumer::is_running "${topic}"; then
-		logger::err "No existe un consumer para el tópico: ${topic}"
-		return 1
-	fi
-
 	### Comprueba si existe el log para visualizar
 	if [[ ! -f "${log_file}" ]]; then
 		logger::err "No se ha encontrado el archivo de log: ${log_file}"
