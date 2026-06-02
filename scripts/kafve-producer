@@ -1,9 +1,34 @@
 #!/usr/bin/env bash
+# --- CONFIG --------------------------------------------------------
+source "./scripts/logger"
+source "./scripts/kafve-commons"
 
-################################################################################
-#                                    MAIN                                      #
-################################################################################
-main_producer() {
+set -o errexit
+set -o errtrace
+set -o nounset
+set -o pipefail
+
+# --- ERROR CONTROL --------------------------------------------------------
+
+# @description Limpia archivos temporales y notifica fallos en el script.
+# @param $1 string Número de línea donde ocurrió el error.
+consumer::catch_error() {
+	local -r line_number="$1"
+	local -r script_name="${BASH_SOURCE[1]:-$0}"
+
+	logger::err "Error en ${script_name}:${line_number}" >&2
+	logger::err "Comando fallido: '${BASH_COMMAND}'" >&2
+
+	exit 1
+}
+
+trap 'consumer::catch_error $LINENO' ERR
+
+# --- FUNCTIONS -----------------------------------------------------------
+
+# @description Punto de entrada principal para el productor de Kafve.
+# @param $@ string Argumentos de la línea de comandos.
+producer::main() {
 	local command=""
 	local key="K-$RANDOM$RANDOM"
 	local topic="SOMETHING"
@@ -13,140 +38,161 @@ main_producer() {
 	### Procesado de argumentos
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-			send)
-                command="send"
-                shift
-                ;;
-			-t|--topic)
-				topic="$2"
-				shift 2
-				;;
-            -k|--key)
-            	key="$2"
-            	shift 2
-            	;;
-			-m|--message)
-				message="$2"
-				shift 2
-				;;
-			-f|--file)
-				file_rute="$2"
-				shift 2
-				;;
-			*)
-				echo "[SKIP] ./kafve producer <comando> [argumentos]"
-				return 0
-				;;
+		send)
+			command="send"
+			shift
+			;;
+		-t | --topic)
+			topic="$2"
+			shift 2
+			;;
+		-k | --key)
+			key="$2"
+			shift 2
+			;;
+		-m | --message)
+			message="$2"
+			shift 2
+			;;
+		-f | --file)
+			file_rute="$2"
+			shift 2
+			;;
+		*)
+			logger::custom "SKIP" "/kafve producer <comando> [argumentos]"
+			return 0
+			;;
 		esac
-    done
+	done
 
 	# Delegación de comandos
-    case "$command" in
-        "send")
-            producer_send "$topic" "$key" "$message" "$file_rute"
-            ;;
-        *)
-        	return 1
-        	;;
-    esac
+	case "$command" in
+	"send")
+		# Se envuelve en un if para controlar el código de salida sin disparar el trap ERR
+		producer::send "${topic}" "${key}" "${message}" "${file_rute}"
+		;;
+	*)
+		logger::custom "SKIP" "/kafve producer <comando> [argumentos]"
+		return 0
+		;;
+	esac
 }
 
-producer_send() {
-	echo "[RUN] Procesando envío."
-	local topic="$1"
-	local key="$2"
-	local message="$3"
-	local file_rute="$4"
+# @description Orquesta las validaciones y el envío del payload al tópico de Kafka.
+# @param $1 string Nombre del tópico.
+# @param $2 string Clave del mensaje.
+# @param $3 string Mensaje de texto plano (opcional).
+# @param $4 string Ruta al archivo con el payload (opcional).
+producer::send() {
+	logger::run "Procesando envío."
+	local -r topic="$1"
+	local -r key="$2"
+	local -r message="$3"
+	local -r file_rute="$4"
 
 	### Comprobación de que habrá algo en el payload
-    if [[ -z $message && -z $file_rute ]]; then
-    	echo "[ERROR] El payload no debe estar vacío"
-    	exit 1
-    fi
+	if [[ -z "${message}" && -z "${file_rute}" ]]; then
+		logger::err "El payload no debe estar vacío"
+		return 1
+	fi
 
-	### Comprueba que el tópico existe
-    if check_topic_exists "$KAFVE_BROKER_URL" "$topic"; then
-        echo " -[OK] El tópico '$topic' ya existe en el servidor."
-    else
-        if create_topic "$KAFVE_BROKER_URL" "$topic"; then
-            echo " -[SUCCESS] Tópico '$topic' creado correctamente en $KAFVE_BROKER_URL."
-        else
-            echo "[ERROR] Falló la creación del tópico '$topic'."
-            exit 1
-        fi
-    fi
+	### Comprueba que el tópico existe o intenta crearlo
+	if producer::check_topic_exists "${KAFVE_BROKER_URL}" "${topic}"; then
+		logger::ok "Tópico '${topic}' verificado (ya existe en el servidor)."
+	else
+		if producer::create_topic "${KAFVE_BROKER_URL}" "${topic}"; then
+			logger::ok "Tópico '${topic}' creado exitosamente."
+		else
+			logger::err "Falló la creación del tópico '${topic}'."
+			return 1
+		fi
+	fi
 
 	### Mandar mensaje a partir de un archivo (json, xml, csv...)
-	if [[ -n $file_rute ]]; then
-		if [[ ! -f $file_rute ]]; then
-			echo "[ERROR] No se ha podido leer el archivo: $file_rute"
-			exit 0
+	if [[ -n "${file_rute}" ]]; then
+		if [[ ! -f "${file_rute}" ]]; then
+			logger::err "No se ha podido leer el archivo: ${file_rute}"
+			return 1
 		fi
 
 		local read_file
-        read_file=$(tr -d '\n\r\t' < "$file_rute")
-		if send_message "$topic" "$key" "$read_file"; then
-           echo "[DONE] Mensaje entregado correctamente (Key: '$key')."
-           exit 0
-        else
-           echo "[ERROR] Error de red o broker: No se pudo entregar el mensaje en '$topic'."
-           exit 1
-        fi
+		read_file=$(tr -d '\n\r\t' <"${file_rute}")
+
+		if producer::send_message "${topic}" "${key}" "${read_file}"; then
+			logger::done "Mensaje entregado correctamente (Key: '${key}')."
+			return 0
+		else
+			logger::err "Error de red o broker: No se pudo entregar el mensaje en '${topic}'."
+			return 1
+		fi
 	fi
 
-	### Mandar mensaje
-	if [[ -n $message ]]; then
-		echo " -[SENDING] Enviando mensaje al tópico '$topic'..."
+	### Mandar mensaje por cadena de texto
+	if [[ -n "${message}" ]]; then
+		logger::custom "SEND" "Enviando mensaje al tópico '${topic}'..."
 
-		if send_message "$topic" "$key" "$message"; then
-		   echo "[DONE] Mensaje entregado correctamente (Key: '$key')."
-		   exit 0
+		if producer::send_message "${topic}" "${key}" "${message}"; then
+			logger::done "Mensaje entregado correctamente (Key: '${key}')."
+			return 0
 		else
-		   echo "[ERROR] Error de red o broker: No se pudo entregar el mensaje en '$topic'."
-		   exit 1
+			logger::err "Error de red o broker: No se pudo entregar el mensaje en '${topic}'."
+			return 1
 		fi
 	fi
 }
 
-check_topic_exists() {
-    local broker="$1"
-    local topic="$2"
+# @description Comprueba si un tópico existe consultando al broker.
+# @param $1 string URL del broker de Kafka.
+# @param $2 string Nombre del tópico.
+producer::check_topic_exists() {
+	local -r broker="$1"
+	local -r topic="$2"
+	local -r script_path=$(kafve_commons::get_kafka_script "kafka-topics" "${KAFVE_KAFKA_DIR:-.}")
 
-    "${KAFVE_KAFKA_DIR}/bin/kafka-topics.sh" \
-        --bootstrap-server "$broker" \
-        --command-config "$KAFVE_KAFKA_PRODUCER_CONFIG" \
-        --describe \
-        --topic "$topic" || return 1
+	"${script_path}" \
+		--bootstrap-server "${broker}" \
+		--command-config "${KAFVE_KAFKA_PRODUCER_CONFIG}" \
+		--describe \
+		--topic "${topic}" >/dev/null 2>&1
 }
 
-create_topic() {
-    local topic="$2"
+# @description Crea un nuevo tópico con configuración por defecto (1 partición, factor réplica 1).
+# @param $1 string URL del broker de Kafka.
+# @param $2 string Nombre del tópico.
+producer::create_topic() {
+	local -r broker="$1"
+	local -r topic="$2"
+	local -r script_path=$(kafve_commons::get_kafka_script "kafka-topics" "${KAFVE_KAFKA_DIR:-.}")
 
-    echo " -[WARN] El tópico '$topic' no existe. Intentando crear..."
-    "${KAFVE_KAFKA_DIR}/bin/kafka-topics.sh" --create \
-        --bootstrap-server "$KAFVE_BROKER_URL" \
-        --command-config "$KAFVE_KAFKA_PRODUCER_CONFIG" \
-        --topic "$topic" \
-        --partitions 1 \
-        --replication-factor 1 || return 1
+	logger::warn "El tópico '${topic}' no existe. Intentando crear..."
+	"${script_path}" \
+		--create \
+		--bootstrap-server "${broker}" \
+		--command-config "${KAFVE_KAFKA_PRODUCER_CONFIG}" \
+		--topic "${topic}" \
+		--partitions 1 \
+		--replication-factor 1 >/dev/null 2>&1
 }
 
-send_message() {
-	local topic="$1"
-	local key="$2"
-	local message="$3"
+# @description Ejecuta el cliente nativo de Kafka para transmitir el mensaje.
+# @param $1 string Nombre del tópico.
+# @param $2 string Clave del mensaje.
+# @param $3 string Contenido del mensaje.
+producer::send_message() {
+	local -r topic="$1"
+	local -r key="$2"
+	local -r message="$3"
+	local -r script_path=$(kafve_commons::get_kafka_script "kafka-console-producer" "${KAFVE_KAFKA_DIR:-.}")
 
-	"${KAFVE_KAFKA_DIR}/bin/kafka-console-producer.sh" \
-    	--topic "$topic" \
-    	--bootstrap-server "$KAFVE_BROKER_URL" \
-    	--producer.config "$KAFVE_KAFKA_PRODUCER_CONFIG" \
-    	--reader-property "parse.key=true" \
-        --reader-property "key.separator=:" \
-        --producer-property acks=all \
-    	<<< "$key:$message" || return 1
+	"${script_path}" \
+		--topic "${topic}" \
+		--bootstrap-server "${KAFVE_BROKER_URL}" \
+		--producer.config "${KAFVE_KAFKA_PRODUCER_CONFIG}" \
+		--reader-property "parse.key=true" \
+		--reader-property "key.separator=:" \
+		--producer-property acks=all \
+		<<<"${key}:${message}" >/dev/null 2>&1
 }
 
-################################################################################
-#                                MAIN RUN                                      #
-################################################################################
-main_producer "$@"
+# --- MAIN RUN -----------------------------------------------------------
+producer::main "$@"
