@@ -10,37 +10,40 @@ set -o pipefail
 
 # --- ERROR CONTROL --------------------------------------------------------
 
-# @description Limpia y notifica fallos.
+# @description Notifica fallos en el script.
+# @params $1 : Número de línea donde ocurrió el error
 function catch_error() {
-  	local -r line_number="$1"
-  	local -r script_name="${BASH_SOURCE[1]:-$0}"
+	local -r line_number="$1"
+	local -r script_name="${BASH_SOURCE[1]:-$0}"
 
-  	logger::err "Error en ${script_name}:${line_number}"
-  	logger::err "Comando fallido: '${BASH_COMMAND}'"
+	logger::err "Error en ${script_name}:${line_number}"
+	logger::err "Comando fallido: '${BASH_COMMAND}'"
 }
 
 trap 'catch_error $LINENO' ERR
 
 # --- VARS -----------------------------------------------------------
-readonly BLACK_LIST=("$KAFVE_KAFKA_DIR" "deps" "log" ".data" "config/cert")
+readonly BLACK_LIST=("${KAFVE_KAFKA_DIR}" "deps" "log" ".data" "config/cert")
 
 # --- FUNCTIONS -----------------------------------------------------------
+# Realiza la limpieza de los directorios en la lista negra.
 run_clean() {
-    logger::run "Iniciando limpieza interna..."
+	logger::run "Iniciando limpieza interna..."
 
-    # TODO: Que pare los consumer y brokers
+	# TODO: Que pare los consumer y brokers
 
-    for rute in "${BLACK_LIST[@]}"; do
-        if [ -e "$rute" ]; then
-            rm -rf "$rute"
-            logger::ok "'$rute' eliminado con éxito."
-        else
-            logger::custom "SKIP" "'$rute' no existe, saltando..."
-        fi
-    done
+	local rute
+	for rute in "${BLACK_LIST[@]}"; do
+		if [[ -e "${rute}" ]]; then
+			rm -rf "${rute}"
+			logger::ok "'${rute}' eliminado con éxito."
+		else
+			logger::custom "SKIP" "'${rute}' no existe, saltando..."
+		fi
+	done
 
-    logger::done "Limpieza completada."
+	logger::done "Limpieza completada."
 }
 
-# --- MAIN RUN -----------------------------------------------------------
-run_clean
+# --- MAIN -----------------------------------------------------------------
+run_clean "$@"
