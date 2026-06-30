@@ -116,7 +116,7 @@ consumer::start() {
 
 	### Comprueba que se ha inicializado correctamente
 	sleep 1
-	if ps -p "${consumer_pid}" >/dev/null; then
+	if jcmd | grep "${consumer_pid} ${KAFKA_CONSUMER_CLASS}" >/dev/null; then
 		logger::done "Consumidor del tópico '${topic}' iniciado en segundo plano."
 		logger::done "Logs disponibles en: ${log_file} (PID: ${consumer_pid})"
 		return 0
@@ -183,7 +183,7 @@ consumer::stop() {
 
 	### Buscamos el pid del consumer para el tópico (Se quitó el redireccionamiento incorrecto del subshell)
 	# shellcheck disable=SC2009
-	pid=$(ps -ef | grep -e "--topic ${topic}" | grep "${KAFKA_CONSUMER_CLASS}" | awk '{print $2}')
+	pid=$(jcmd | grep -e "--topic ${topic}" | grep "${KAFKA_CONSUMER_CLASS}" | awk '{print $1}')
 
 	# Mata el proceso con el pid encontrado para ese tópico
 	if [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ ]]; then
@@ -191,7 +191,7 @@ consumer::stop() {
 
 		### Verificamos si realmente murió
 		sleep 2
-		if ps -p "${pid}" >/dev/null 2>&1; then
+		if jcmd | grep "${pid} ${KAFKA_CONSUMER_CLASS}" >/dev/null 2>&1; then
 			logger::warn "No cerró a tiempo, forzando parada..."
 			kill -9 "${pid}"
 			logger::ok "Consumidor detenido forzando la parada."
@@ -203,7 +203,7 @@ consumer::stop() {
 			logger::ok "Borrado archivo de log del consumer"
 		fi
 
-		logger::done "Consumer con el PID: ${pid}, ha detenido."
+		logger::done "Consumer con el PID: ${pid}, se ha detenido."
 		return 0
 	else
 		logger::err "No se encontró ningún consumidor activo para el tópico '${topic}'."
@@ -220,7 +220,7 @@ consumer::status() {
 	echo "-------------------------------------------------------------------------------------------"
 
 	# shellcheck disable=SC2009
-	ps -ef | grep "${KAFKA_CONSUMER_CLASS}" | grep -v "grep" | while read -r line; do
+	jcmd | grep "${KAFKA_CONSUMER_CLASS}" | while read -r line; do
 		consumer::print_status_row "${line}"
 	done
 	echo "-------------------------------------------------------------------------------------------"
@@ -229,13 +229,16 @@ consumer::status() {
 }
 
 # @description Procesa una línea de comando de proceso de consumidor y la imprime formateada en la tabla.
-# @param $1 string Línea de salida de comando ps.
+# @param $1 string Línea de salida de comando jcmd.
 consumer::print_status_row() {
 	local -r line="$1"
+	local process_uptime_seconds
 	local label_pid label_time label_topic label_broker_url
 
-	label_pid=$(echo "${line}" | awk '{print $2}')
-	label_time=$(echo "${line}" | awk '{print $7}')
+	label_pid=$(echo "${line}" | awk '{print $1}')
+	process_uptime_seconds=$(jcmd "${label_pid}" VM.uptime | tr '\n' ' ' | awk '{print $2}')
+    label_time=$(date -u -d @"${process_uptime_seconds:-0}" +%T)
+
 	label_topic=$(echo "${line}" | awk -F'--topic ' '{print $2}' | awk '{print $1}')
 	label_broker_url=$(echo "${line}" | awk -F'--bootstrap-server ' '{print $2}' | awk '{print $1}')
 
@@ -248,13 +251,7 @@ consumer::print_status_row() {
 consumer::is_running() {
 	local -r topic="$1"
 
-	if [[ "${OS:-Linux}" != "Windows" ]]; then
-		# shellcheck disable=SC2009
-		ps -ef | grep -e "--topic ${topic}" | grep -q "${KAFKA_CONSUMER_CLASS}"
-	else
-		# En Windows, la detección de procesos es limitada sin WSL
-		return 1
-	fi
+	jcmd | grep -e "--topic ${topic}" | grep -q "${KAFKA_CONSUMER_CLASS}"
 }
 
 # --- MAIN RUN -----------------------------------------------------------

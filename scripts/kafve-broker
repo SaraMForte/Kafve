@@ -147,7 +147,7 @@ broker::start() {
 	### Comprueba si ya hay un broker inicializado
 	if broker::is_running; then
 		logger::custom "SKIP" "El Broker ya está en ejecución."
-		exit 0
+		return 0
 	fi
 
 	### Ejecuta el script de inicio del servidor Kafka en segundo plano
@@ -158,6 +158,7 @@ broker::start() {
 	sleep 2
 	if ! broker::is_running; then
 		logger::err "El Broker no ha podido inicializarse correctamente" >&2
+		return 1
 	fi
 
 	logger::done "Se ha inicializado el broker"
@@ -184,6 +185,14 @@ broker::start_run() {
 broker::stop() {
 	logger::run "Deteniendo Broker..."
 
+	### Verifica si el broker esta levantado
+	if ! broker::is_running; then
+		logger::done "El broker de Kafka está levantado y corriendo correctamente."
+		return 0
+	fi
+
+	# TODO: Close Consumer or Producers
+
 	### Señal de parada oficial del broker
 	kafve_commons::get_kafka_script "kafka-server-stop" "${KAFVE_KAFKA_DIR}"
 	logger::custom "TASK" "Enviada señal de parada oficial"
@@ -192,7 +201,7 @@ broker::stop() {
 	sleep 3
 
 	### Verificación de parada del broker
-	if jps | grep -q "Kafka"; then
+	if broker::is_running; then
 		# Parada forzada del broker
 		logger::custom "FORCE" "El proceso no cerró a tiempo, forzando..."
 		pkill -15 -f "kafka.Kafka"
@@ -217,8 +226,7 @@ broker::status() {
 	printf "| %-8s | %-6s | %-60s |\n" "PID" "ESTADO" "CLUSTER ID (UUID)"
 	echo "------------------------------------------------------------------------------------"
 
-	# shellcheck disable=SC2009
-	ps -ef | grep -i "kafka.kafka" | while read -r line; do
+	jcmd | grep "kafka.Kafka" | while read -r line; do
 		broker::print_status_row "${line}"
 	done
 	echo "------------------------------------------------------------------------------------"
@@ -227,21 +235,23 @@ broker::status() {
 }
 
 # @description Procesa e imprime una fila de la tabla de estados para un proceso Kafka detectado.
-# @param $1 string Línea cruda extraída del comando `ps` para el proceso de Kafka.
+# @param $1 string Línea cruda extraída del comando `jcmd` para el proceso de Kafka.
 broker::print_status_row() {
 	local -r line="$1"
-	local label_pid
+	local label_pid label_time
 	local label_cluster_id="Unknown"
-	local log_dir
+	local log_dir process_uptime_seconds
 
-	label_pid=$(echo "${line}" | awk '{print $2}')
+	label_pid=$(echo "${line}" | awk '{print $1}')
+	process_uptime_seconds=$(jcmd "${label_pid}" VM.uptime | tr '\n' ' ' | awk '{print $2}')
+	label_time=$(date -u -d @"${process_uptime_seconds:-0}" +%T)
 	log_dir=$(kafve_commons::normalize_path "$(grep "^log.dirs=" "${KAFVE_KAFKA_CONFIG}" | head -n 1 | cut -d'=' -f2)")
 
 	if [[ -f "${log_dir}/meta.properties" ]]; then
 		label_cluster_id=$(grep "cluster.id" "${log_dir}/meta.properties" | cut -d'=' -f2 | tr -d '\r')
 	fi
 
-	printf "| %-8s | %-6s | %-60s |\n" "${label_pid}" "OK" "${label_cluster_id}"
+	printf "| %-8s | %-6s | %-8s | %-52s |\n" "${label_pid}" "OK" "${label_time}" "${label_cluster_id}"
 }
 
 # @description Muestra el visor de logs (tail -f) en tiempo real para el archivo server.log de Kafka.
@@ -274,10 +284,12 @@ broker::logs() {
 	trap - INT
 }
 
-# @description Verifica si el proceso de Kafka está activo mediante jps.
+# TODO: Añadir listado de topics
+
+# @description Verifica si el proceso de Kafka está activo mediante jcmd.
 # @return 0 si se encuentra activo, 1 en caso contrario.
 broker::is_running() {
-	jps -l | grep -iq "kafka.kafka"
+	jcmd | grep -q "kafka.Kafka"
 }
 
 # --- Main run -----------------------------------------------------------

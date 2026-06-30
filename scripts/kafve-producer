@@ -90,6 +90,8 @@ producer::send() {
 	local -r message="$3"
 	local -r file_rute="$4"
 
+	# TODO: Comprobar que el broker esta levantado y disponible
+
 	### Comprobación de que habrá algo en el payload
 	if [[ -z "${message}" && -z "${file_rute}" ]]; then
 		logger::err "El payload no debe estar vacío"
