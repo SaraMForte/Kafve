@@ -32,46 +32,55 @@ readonly KAFKA_CONSUMER_CLASS="org.apache.kafka.tools.consumer.ConsoleConsumer"
 # @description Punto de entrada principal para gestionar las acciones de los consumidores de Kafka.
 # @param $@ string Argumentos pasados al script (ej: start, stop, -t, --topic mi_topic).
 consumer::main() {
-	local command=""
-	local topic="SOMETHING"
+    local action=""
+    local topic="SOMETHING"
+    local all=false
 
-	### Procesado de argumentos
-	while [[ $# -gt 0 ]]; do
-		case "$1" in
-		start)
-			command="start"
-			shift
-			;;
-		stop)
-			command="stop"
-			shift
-			;;
-		logs)
-			command="logs"
-			shift
-			;;
-		status)
-			command="status"
-			shift
-			;;
-		-t | --topic)
-			topic="${2:-}"
-			shift 2
-			;;
-		*)
-			logger::custom "SKIP" "./kafve consumer <comando> [argumentos]"
-			return 0
-			;;
-		esac
-	done
+    ### Procesado de argumentos
+    while [[ $# -gt 0 ]]; do
+       case "$1" in
+       start)
+          action="start"
+          shift
+          ;;
+       stop)
+          action="stop"
+          shift
+          ;;
+       logs)
+          action="logs"
+          shift
+          ;;
+       status)
+          action="status"
+          shift
+          ;;
+       -t | --topic)
+          topic="${2:-}"
+          shift 2
+          ;;
+       --all)
+          all=true
+          shift 1
+          ;;
+       *)
+          logger::custom "SKIP" "./kafve consumer <comando> [argumentos]"
+          return 0
+          ;;
+       esac
+    done
 
 	### Delegación de comandos
-	case "${command}" in
+	case "${action}" in
 	"start")
 		consumer::start "${topic}"
 		;;
-	"stop") # TODO: Implementar --all
-		consumer::stop "${topic}"
+	"stop")
+		if [[ "${all}" == true ]]; then
+			consumer::stop_all
+		else
+			consumer::stop "${topic}"
+		fi
 		;;
 	"logs")
 		consumer::logs "${topic}"
@@ -88,8 +97,9 @@ consumer::main() {
 # @description Inicializa un consumidor de Kafka en segundo plano y redirige su salida a un archivo de log.
 # @param $1 string Nombre del tópico a consumir.
 consumer::start() {
-	local -r topic="$1"
-	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+    local topic="$1"
+    local log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+    local consumer_pid
 
 	logger::run "Inicializando consumidor para el tópico: ${topic}"
 
@@ -131,10 +141,12 @@ consumer::start() {
 # @param $2 string Ruta al archivo de log donde volcar la salida.
 # @stdout string Devuelve el PID del proceso generado.
 consumer::start_run() {
-	local -r topic="$1"
-	local -r log_file="$2"
-	local -r script_path=$(kafve_commons::get_kafka_script "kafka-console-consumer" "${KAFVE_KAFKA_DIR:-.}")
+    local topic="$1"
+    local log_file="$2"
+    local script_path
 	local consumer_pid
+
+    script_path=$(kafve_commons::get_kafka_script "kafka-console-consumer" "${KAFVE_KAFKA_DIR:-.}")
 
 	### Inicializa el consumer en segundo plano
 	"${script_path}" \
@@ -145,7 +157,7 @@ consumer::start_run() {
 		--property key.separator=" | " \
 		--bootstrap-server "${KAFVE_BROKER_URL}" \
 		>"${log_file}" 2>&1 &
-	# Guarda el PID real de consumer
+
 	consumer_pid=$!
 
 	echo "${consumer_pid}"
@@ -154,8 +166,8 @@ consumer::start_run() {
 # @description Abre el visor de logs en tiempo real para un consumidor específico.
 # @param $1 string Nombre del tópico.
 consumer::logs() {
-	local -r topic="$1"
-	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+    local topic="$1"
+    local log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
 
 	logger::run "Abriendo visor de logs para el consumer en tiempo real..."
 
@@ -175,40 +187,130 @@ consumer::logs() {
 # @description Detiene de forma ordenada o forzada el consumidor asignado a un tópico.
 # @param $1 string Nombre del tópico.
 consumer::stop() {
-	local -r topic="$1"
-	local -r log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+    local topic="$1"
 	local pid
 
 	logger::run "Deteniendo consumidor del tópico '${topic}'"
 
 	### Buscamos el pid del consumer para el tópico (Se quitó el redireccionamiento incorrecto del subshell)
 	# shellcheck disable=SC2009
-	pid=$(jcmd | grep -e "--topic ${topic}" | grep "${KAFKA_CONSUMER_CLASS}" | awk '{print $1}')
+	if ! pid=$(jcmd | grep -e "--topic ${topic}" | grep "${KAFKA_CONSUMER_CLASS}" | awk '{print $1}'); then
+		logger::err "No se encontró un consumer en ejecución para el tópico: ${topic}"
+		return 0
+	fi
 
 	# Mata el proceso con el pid encontrado para ese tópico
-	if [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ ]]; then
-		kill "${pid}"
+	consumer::clean_topics_logs "${pid}"
+	consumer::stop_pid_process "${pid}"
+}
 
-		### Verificamos si realmente murió
-		sleep 2
-		if jcmd | grep "${pid} ${KAFKA_CONSUMER_CLASS}" >/dev/null 2>&1; then
-			logger::warn "No cerró a tiempo, forzando parada..."
-			kill -9 "${pid}"
-			logger::ok "Consumidor detenido forzando la parada."
-		fi
+# @description Detiene todos los consumidores de forma ordenada o forzada.
+# @return 0 tanto si detiene consumidores como si no encuentra ninguno activo.
+consumer::stop_all() {
+    local consumers_list
+    local line pid
 
-		### Elimina el archivo de log como parte del proceso de parada y limpieza
-		if [[ -f "${log_file}" ]]; then
-			rm -f "${log_file}"
-			logger::ok "Borrado archivo de log del consumer"
-		fi
+    logger::run "Deteniendo los consumidores"
 
-		logger::done "Consumer con el PID: ${pid}, se ha detenido."
-		return 0
-	else
-		logger::err "No se encontró ningún consumidor activo para el tópico '${topic}'."
+    ### Verificamos si la lista quedó vacía (-z)
+    if ! consumers_list=$(jcmd | grep "${KAFKA_CONSUMER_CLASS}"); then
+       logger::warn "No se encontró ningún consumidor activo en ejecución."
+       logger::done "Proceso de parada finalizado sin cambios."
+       return 0
+    fi
+
+    ### Procesamos la lista línea por línea usando un "Here-string" (<<<)
+    while read -r line; do
+       pid=$(echo "${line}" | awk '{print $1}')
+       consumer::clean_topics_logs "${pid}"
+       consumer::stop_pid_process "${pid}"
+    done <<< "${consumers_list}"
+
+    logger::done "Se han detenido los consumidores"
+}
+
+# @description Detiene un proceso de forma ordenada (SIGTERM) con un tiempo de espera (timeout).
+# Si el proceso no responde, fuerza su finalización utilizando una señal letal (SIGKILL).
+# @param $1 int El Identificador de Proceso (PID) que se desea detener.
+consumer::stop_pid_process() {
+	local pid="$1"
+    local timeout=5  # Corrección: En minúsculas por ser variable local interna
+
+	### Verificamos que el PID no esta vacío y son solo valores númericos
+	if [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]]; then
+		logger::err "PID inválido: ${pid}"
 		return 1
 	fi
+
+	### Comprobar si el proceso realmente existe antes de actuar
+	if ! kill -0 "${pid}" 2>/dev/null; then
+		logger::warn "El proceso con PID ${pid} no está en ejecución."
+		return 0
+	fi
+
+	### Mata el proceso con el pid encontrado para ese pid
+	kill -15 "${pid}"
+	logger::ok "Sending SIGTERM to process ${pid}..."
+
+	### Verificamos si realmente murió
+	while ((timeout > 0)); do
+		if ! kill -0 "${pid}" 2>/dev/null; then
+			logger::done "Process ${pid} terminated gracefully."
+			return 0
+		fi
+
+		sleep 1
+		timeout=$((timeout - 1))
+	done
+
+	### Verificamos si realmente murió
+	logger::warn "El proceso no respondió a tiempo. Forzando parada con SIGKILL..."
+	kill -9 "${pid}" 2>/dev/null
+
+	### Confirmación final de la parada forzada
+	sleep 0.5
+	if ! kill -0 "${pid}" 2>/dev/null; then
+		logger::done "Proceso ${pid} detenido por la fuerza."
+		return 0
+	else
+		logger::err "No se pudo detener el proceso ${pid} incluso con SIGKILL."
+		return 1
+	fi
+}
+
+# @description Elimina el archivo de log como parte del proceso de parada y limpieza
+# @param $1 pid del proceso del cual extraer el tópico
+consumer::clean_topics_logs() {
+    local pid="$1"
+    local topic log_file
+
+    ### Validar que se ha pasado el PID requerido
+    if [[ -z "${pid}" ]]; then
+       logger::err "No se proporcionó el PID del proceso."
+       return 1
+    fi
+
+    ### Control estricto del directorio de logs
+    if [[ -z "${KAFVE_LOG_DIR}" ]]; then
+       logger::err "La variable de entorno KAFVE_LOG_DIR no está configurada."
+       return 1
+    fi
+
+    ### 3. Obtener el tópico de manera segura
+    if ! topic=$(jcmd "${pid}" VM.command_line 2>/dev/null | grep -oP '(?<=--topic )\S+') ||
+       [[ -z "${topic}" ]]; then
+       logger::err "No se pudo obtener un tópico válido para el PID ${pid}."
+       return 1
+    fi
+
+    ### 4. Borrar el archivo de log de forma segura
+    log_file="${KAFVE_LOG_DIR}/consumer-${topic}.log"
+    if [[ -f "${log_file}" ]]; then
+       rm -f "${log_file}"
+       logger::ok "Borrado archivo de log del consumer para el tópico: ${topic}"
+    else
+       logger::warn "No se encontró el archivo de log: ${log_file}"
+    fi
 }
 
 # @description Muestra por pantalla una tabla con todos los consumidores de Kafka activos.
@@ -231,13 +333,13 @@ consumer::status() {
 # @description Procesa una línea de comando de proceso de consumidor y la imprime formateada en la tabla.
 # @param $1 string Línea de salida de comando jcmd.
 consumer::print_status_row() {
-	local -r line="$1"
+    local line="$1"
 	local process_uptime_seconds
 	local label_pid label_time label_topic label_broker_url
 
 	label_pid=$(echo "${line}" | awk '{print $1}')
-	process_uptime_seconds=$(jcmd "${label_pid}" VM.uptime | tr '\n' ' ' | awk '{print $2}')
-    label_time=$(date -u -d @"${process_uptime_seconds:-0}" +%T)
+    process_uptime_seconds=$(jcmd "${label_pid}" VM.uptime 2>/dev/null | tr '\n' ' ' | awk '{print $2}')
+	label_time=$(date -u -d @"${process_uptime_seconds:-0}" +%T)
 
 	label_topic=$(echo "${line}" | awk -F'--topic ' '{print $2}' | awk '{print $1}')
 	label_broker_url=$(echo "${line}" | awk -F'--bootstrap-server ' '{print $2}' | awk '{print $1}')
@@ -249,7 +351,7 @@ consumer::print_status_row() {
 # @param $1 string Nombre del tópico.
 # @return 0 si se está ejecutando, 1 en caso contrario.
 consumer::is_running() {
-	local -r topic="$1"
+    local topic="$1"
 
 	jcmd | grep -e "--topic ${topic}" | grep -q "${KAFKA_CONSUMER_CLASS}"
 }
