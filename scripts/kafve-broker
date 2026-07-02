@@ -191,7 +191,8 @@ broker::stop() {
 		return 0
 	fi
 
-	# TODO: Close Consumer or Producers
+	### Verifica y apaga los consumidores
+	./scripts/kafve-consumer stop --all
 
 	### Señal de parada oficial del broker
 	kafve_commons::get_kafka_script "kafka-server-stop" "${KAFVE_KAFKA_DIR}"
