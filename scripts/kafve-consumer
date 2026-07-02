@@ -55,6 +55,10 @@ consumer::main() {
 			action="logs"
 			shift
 			;;
+		consume-next)
+			action="consume-next"
+			shift
+			;;
 		status)
 			action="status"
 			shift
@@ -92,6 +96,9 @@ consumer::main() {
 		;;
 	"logs")
 		consumer::logs "${topic}"
+		;;
+	"consume-next")
+		consumer::consume_next "${topic}"
 		;;
 	"status")
 		consumer::status
@@ -160,10 +167,12 @@ consumer::start_run() {
 	"${script_path}" \
 		--consumer.config "${KAFVE_KAFKA_CONSUMER_CONFIG}" \
 		--topic "${topic}" \
+		--group "group-consumer-${topic}" \
 		--from-beginning \
 		--property print.key=true \
 		--property key.separator=" | " \
-		--bootstrap-server "${KAFVE_BROKER_CONTROLLER_URL}" \
+		--bootstrap-server "${KAFVE_BROKER_CLIENT_URL}" \
+		--consumer-property enable.auto.commit=false \
 		>"${log_file}" 2>&1 &
 
 	consumer_pid=$!
@@ -330,14 +339,14 @@ consumer::status() {
 		return 0
 	fi
 
-	echo "-------------------------------------------------------------------------------------------"
-	printf "| %-8s | %-22s | %-8s | %-40s |\n" "PID" "TOPIC" "TIME" "BROKER URL"
-	echo "-------------------------------------------------------------------------------------------"
+	echo "--------------------------------------------------------------------------------------------------------"
+	printf "| %-8s | %-22s | %-10s | %-8s | %-40s |\n" "PID" "TOPIC" "OFFSET" "TIME" "BROKER URL"
+	echo "--------------------------------------------------------------------------------------------------------"
 
 	while read -r line; do
 		consumer::print_status_row "${line}"
 	done < <(jcmd | grep "${KAFKA_CONSUMER_CLASS}")
-	echo "-------------------------------------------------------------------------------------------"
+	echo "--------------------------------------------------------------------------------------------------------"
 
 	logger::done "Consulta de estado finalizada."
 }
@@ -346,8 +355,8 @@ consumer::status() {
 # @param $1 string Línea de salida de comando jcmd.
 consumer::print_status_row() {
 	local line="$1"
-	local process_uptime_seconds
-	local label_pid label_time label_topic label_broker_url
+	local process_uptime_seconds script_path group_id
+	local label_pid label_time label_topic label_broker_url label_offset
 
 	label_pid=$(echo "${line}" | awk '{print $1}')
 	process_uptime_seconds=$(jcmd "${label_pid}" VM.uptime 2>/dev/null | tr '\n' ' ' | awk '{print $2}')
@@ -356,7 +365,83 @@ consumer::print_status_row() {
 	label_topic=$(echo "${line}" | awk -F'--topic ' '{print $2}' | awk '{print $1}')
 	label_broker_url=$(echo "${line}" | awk -F'--bootstrap-server ' '{print $2}' | awk '{print $1}')
 
-	printf "| %-8s | %-22s | %-8s | %-40s |\n" "${label_pid}" "${label_topic}" "${label_time}" "${label_broker_url}"
+	script_path=$(kafve_commons::get_kafka_script "kafka-consumer-groups" "${KAFVE_KAFKA_DIR:-.}")
+	group_id=$(jcmd "${label_pid}" VM.command_line 2>/dev/null | grep -oP '(?<=--group )\S+' || echo "")
+	if [[ -n "${group_id}" ]]; then
+		label_offset=$("${script_path}" --bootstrap-server "${KAFVE_BROKER_CLIENT_URL}" --describe --group "${group_id}" 2>/dev/null |
+			grep "${label_topic}" | awk '{print $4}' | head -n 1)
+	fi
+
+	printf "| %-8s | %-22s | %-10s | %-8s | %-40s |\n" \
+		"${label_pid}" "${label_topic}" "${label_offset:-0}" "${label_time}" "${label_broker_url}"
+}
+
+# @description Lee el siguiente mensaje pendiente del grupo, lo procesa/muestra y confirma su lectura.
+# @param $1 string Nombre del tópico.
+consumer::consume_next() {
+	local -r topic="$1"
+	local -r group_id="group-consumer-${topic}"
+	local script_group script_consumer
+	local current_offset next_offset message
+
+	script_group=$(kafve_commons::get_kafka_script "kafka-consumer-groups" "${KAFVE_KAFKA_DIR:-.}")
+	script_consumer=$(kafve_commons::get_kafka_script "kafka-console-consumer" "${KAFVE_KAFKA_DIR:-.}")
+
+	### Comprueba si ya se ha arrancado un consumer en el tópico
+	if consumer::is_running "${topic}"; then
+		logger::warn "Ya existe un consumer para el tópico: ${topic}"
+		return 0
+	fi
+
+	### Consultar a Kafka qué offset tiene pendiente este grupo (CURRENT-OFFSET)
+	current_offset=$("${script_group}" --bootstrap-server "${KAFVE_BROKER_CLIENT_URL}" --describe --group "${group_id}" 2>/dev/null |
+		grep "${topic}" | awk '{print $4}' | head -n 1 || echo "")
+
+	### Si el grupo es nuevo, da vacío o devuelve el guion de Kafka '-', empezamos en el 0
+	if [[ -z "${current_offset}" || "${current_offset}" == "-" || "${current_offset}" == "" ]]; then
+		current_offset=0
+	fi
+
+	logger::run "Leyendo el siguiente mensaje disponible (Offset: ${current_offset})..."
+
+	### Consumir exactamente el mensaje de ese offset
+	message=$("${script_consumer}" \
+		--bootstrap-server "${KAFVE_BROKER_CLIENT_URL}" \
+		--topic "${topic}" \
+		--partition 0 \
+		--offset "${current_offset}" \
+		--max-messages 1 \
+		--timeout-ms 2000 2>/dev/null | grep -v "Processed a total of" || echo "")
+
+	###Si no hay mensaje nuevo tras el timeout, indicamos que la cola está vacía
+	if [[ -z "${message}" ]]; then
+		logger::err "TIMEOUT: No hay mensajes en la cola del tópico '${topic}'."
+		return 1
+	fi
+
+	echo "--------------------------------------------------------------------------------"
+	logger::custom "MSG" "Procesando: ${message}"
+	echo "--------------------------------------------------------------------------------"
+
+	### Calcular el siguiente paso (+1) y hacer el commit manual en el Broker
+	next_offset=$((current_offset + 1))
+
+	### Quitamos la redirección silenciosa para ver el error real si el consumidor está activo
+	if "${script_group}" \
+		--bootstrap-server "${KAFVE_BROKER_CLIENT_URL}" \
+		--group "${group_id}" \
+		--topic "${topic}" \
+		--reset-offsets \
+		--to-offset "${next_offset}" \
+		--execute >/dev/null; then
+
+		logger::done "Commit realizado con éxito. Siguiente lectura apuntará al offset: ${next_offset}"
+		return 0
+	else
+		logger::err "No se pudo confirmar el mensaje en Kafka."
+		logger::err "REGLA: Debes ejecutar './kafve consumer stop -t ${topic}' antes de usar consume-next."
+		return 1
+	fi
 }
 
 # @description Comprueba si un consumidor específico de un tópico está activo en el sistema.
@@ -370,7 +455,7 @@ consumer::is_running() {
 
 # @description Imprime el menú de ayuda con la descripción detallada de los comandos.
 consumer::help() {
-	cat <<'EOF'
+  cat <<'EOF'
 Consumer (Gestión de consumo de mensajes):
     Uso: ./kafve consumer <acción> [opciones]
 
@@ -379,22 +464,26 @@ Consumer (Gestión de consumo de mensajes):
         stop <-t tópico>     Detiene un consumidor para un tópico específico.
         stop --all           Detiene todos los consumidores de forma masiva.
         logs <-t tópico>     Muestra los logs del consumidor en tiempo real.
+        consume-next <-t top>Lee el siguiente mensaje atómico y hace commit manual.
         status               Lista todos los consumidores activos.
         help, -h             Muestra este panel de asistencia técnica.
 
     Descripción de Acciones:
-        start   Inicializa un consumidor en segundo plano para el tópico indicado.
-                Crea logs en log/consumer-<tópico>.log y verifica que arranque correctamente.
-        stop    Detiene el consumidor del tópico especificado, eliminando logs residuales.
-        logs    Abre un visor en tiempo real de los logs del consumidor (tail -f).
-        status  Muestra una tabla con PID, tópico, tiempo y URL del broker de consumidores activos.
+        start         Inicializa un consumidor en segundo plano para el tópico indicado.
+                      Crea logs en log/consumer-<tópico>.log y verifica que arranque correctamente.
+        stop          Detiene el consumidor del tópico especificado, eliminando logs residuales.
+        consume-next  Consulta el offset actual, extrae el siguiente mensaje único disponible
+                      en la cola y confirma manualmente su lectura avanzando el puntero (+1).
+        logs          Abre un visor en tiempo real de los logs del consumidor (tail -f).
+        status        Muestra una tabla con PID, tópico, tiempo y URL del broker de consumidores activos.
 
     Opciones:
-        -t, --topic     Nombre del tópico (Obligatorio para start, stop y logs).
+        -t, --topic     Nombre del tópico (Obligatorio para start, stop, logs y consume-next).
         --all           Aplica la acción de detención sobre todos los procesos activos.
 
     Ejemplos:
         ./kafve consumer start -t Example
+        ./kafve consumer consume-next -t Example
         ./kafve consumer stop --all
         ./kafve consumer status
 
