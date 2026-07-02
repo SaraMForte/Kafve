@@ -227,9 +227,10 @@ broker::status() {
 	printf "| %-8s | %-6s | %-60s |\n" "PID" "ESTADO" "CLUSTER ID (UUID)"
 	echo "------------------------------------------------------------------------------------"
 
-	jcmd | grep "kafka.Kafka" | while read -r line; do
+	while read -r line; do
 		broker::print_status_row "${line}"
-	done
+	done < <(jcmd | grep "kafka.Kafka")
+
 	echo "------------------------------------------------------------------------------------"
 
 	logger::done "Consulta de estado finalizada."
