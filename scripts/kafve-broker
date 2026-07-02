@@ -79,7 +79,7 @@ broker::init() {
 	### Busca el directorio de configuración para Kafka
 	if [[ ! -f "$(kafve_commons::normalize_path "${KAFVE_KAFKA_CONFIG}")" ]]; then
 		logger::err "No se encuentra el archivo de configuración en ${KAFVE_KAFKA_CONFIG}" >&2
-		exit 1
+		return 1
 	fi
 
 	### Toma el directorio de metadata del cluster de KAFVE_KAFKA_CONFIG (Por defecto un server.properties)
@@ -94,7 +94,7 @@ broker::init() {
 		else
 			logger::err "El directorio ${log_dir} ya contiene datos." >&2
 			logger::err "Usa --force si quieres borrar el cluster actual y crear uno nuevo." >&2
-			exit 1
+			return 1
 		fi
 	fi
 
@@ -102,7 +102,7 @@ broker::init() {
 	cluster_id=$($(kafve_commons::get_kafka_script "kafka-storage" "${KAFVE_KAFKA_DIR}") random-uuid)
 	if [[ -z "${cluster_id}" ]]; then
 		logger::err "No se pudo generar el Cluster ID" >&2
-		exit 1
+		return 1
 	fi
 	logger::ok "Cluster ID generado: ${cluster_id}"
 
@@ -113,7 +113,7 @@ broker::init() {
 		return 0
 	else
 		logger::err "Se ha producido un error formateando el cluster" >&2
-		exit 1
+		return 1
 	fi
 }
 
@@ -220,7 +220,7 @@ broker::status() {
 
 	if ! broker::is_running; then
 		logger::err "El Broker no se encuentra activo." >&2
-		exit 1
+		return 1
 	fi
 
 	echo "------------------------------------------------------------------------------------"
@@ -271,7 +271,7 @@ broker::logs() {
 	### Comprueba si existen brokers activos
 	if ! broker::is_running; then
 		logger::err "El Broker no se encuentra activo." >&2
-		exit 1
+		return 1
 	fi
 
 	### info para salir
