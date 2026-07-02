@@ -110,10 +110,10 @@ producer::send() {
 	fi
 
 	### Comprueba que el tópico existe o intenta crearlo
-	if producer::check_topic_exists "${KAFVE_BROKER_URL}" "${topic}"; then
+	if producer::check_topic_exists "${KAFVE_BROKER_CONTROLLER_URL}" "${topic}"; then
 		logger::ok "Tópico '${topic}' verificado (ya existe en el servidor)."
 	else
-		if producer::create_topic "${KAFVE_BROKER_URL}" "${topic}"; then
+		if producer::create_topic "${KAFVE_BROKER_CONTROLLER_URL}" "${topic}"; then
 			logger::ok "Tópico '${topic}' creado exitosamente."
 		else
 			logger::err "Falló la creación del tópico '${topic}'."
@@ -199,7 +199,7 @@ producer::send_message() {
 
 	"${script_path}" \
 		--topic "${topic}" \
-		--bootstrap-server "${KAFVE_BROKER_URL}" \
+		--bootstrap-server "${KAFVE_BROKER_CONTROLLER_URL}" \
 		--producer.config "${KAFVE_KAFKA_PRODUCER_CONFIG}" \
 		--reader-property "parse.key=true" \
 		--reader-property "key.separator=:" \

@@ -163,7 +163,7 @@ consumer::start_run() {
 		--from-beginning \
 		--property print.key=true \
 		--property key.separator=" | " \
-		--bootstrap-server "${KAFVE_BROKER_URL}" \
+		--bootstrap-server "${KAFVE_BROKER_CONTROLLER_URL}" \
 		>"${log_file}" 2>&1 &
 
 	consumer_pid=$!

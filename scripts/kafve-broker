@@ -39,6 +39,9 @@ broker::main() {
 	done
 
 	case "${1:-}" in
+	 "help" | "-h" | "--help" | "")
+		broker::help
+		;;
 	"init")
 		broker::init "${force_flag}"
 		;;
@@ -54,9 +57,9 @@ broker::main() {
 	"logs")
 		broker::logs
 		;;
-	"-h" | "--help" | "help" | "")
-        broker::help
-        ;;
+	"topics")
+		broker::topics
+		;;
 	*)
 		return 0
 		;;
@@ -289,7 +292,42 @@ broker::logs() {
 	trap - INT
 }
 
-# TODO: Añadir listado de topics
+# @description Muestra por pantalla un listado con todos los tópicos creados en el broker.
+# @return 0 si tuvo éxito, 1 si el broker está caído o falla la consulta.
+broker::topics() {
+	logger::run "Consultando listado de tópicos en el servidor..."
+
+	### Comprobar que el broker está levantado y disponible
+	if ! broker::is_running; then
+		logger::err "El Broker no se encuentra activo. No se pueden listar los tópicos." >&2
+		return 1
+	fi
+
+	echo "------------------------------------------------------------------------------------"
+	echo " TÓPICOS ACTIVOS EN EL CLUSTER "
+	echo "------------------------------------------------------------------------------------"
+
+	# Ejecuta el listado filtrando posibles salidas vacías
+	if ! broker::topics_run; then
+		echo "------------------------------------------------------------------------------------"
+		logger::err "Error al conectar con el servidor para obtener los tópicos." >&2
+		return 1
+	fi
+
+	echo "------------------------------------------------------------------------------------"
+	logger::done "Consulta de tópicos finalizada."
+	return 0
+}
+
+# @description Ejecuta el comando interno de Kafka para listar los tópicos existentes.
+broker::topics_run() {
+	local script_path
+	script_path=$(kafve_commons::get_kafka_script "kafka-topics" "${KAFVE_KAFKA_DIR:-.}")
+
+	"${script_path}" \
+		--bootstrap-server "${KAFVE_BROKER_CLIENT_URL}" \
+		--list
+}
 
 # @description Verifica si el proceso de Kafka está activo mediante jcmd.
 # @return 0 si se encuentra activo, 1 en caso contrario.
@@ -299,7 +337,7 @@ broker::is_running() {
 
 # @description Imprime el menú de ayuda con la descripción detallada de los comandos.
 broker::help() {
-  cat << 'EOF'
+	cat <<'EOF'
 Broker (Gestión del nodo Kafka):
     Uso: ./kafve broker <acción> [opciones]
 
