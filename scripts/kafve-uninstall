@@ -30,8 +30,10 @@ readonly BLACK_LIST=("${KAFVE_KAFKA_DIR}" "deps" "log" ".data" "config/cert")
 run_clean() {
 	logger::run "Iniciando limpieza interna..."
 
-	# TODO: Que pare los consumer y brokers
+	### Detiene el broker y los consumidores de Kafka antes de iniciar la limpieza
+        ./scripts/kafve-broker stop
 
+	### Recorre la lista negra de directorios/archivos para eliminarlos
 	local rute
 	for rute in "${BLACK_LIST[@]}"; do
 		if [[ -e "${rute}" ]]; then
