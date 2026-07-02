@@ -54,6 +54,9 @@ broker::main() {
 	"logs")
 		broker::logs
 		;;
+	"-h" | "--help" | "help" | "")
+        broker::help
+        ;;
 	*)
 		return 0
 		;;
@@ -292,6 +295,39 @@ broker::logs() {
 # @return 0 si se encuentra activo, 1 en caso contrario.
 broker::is_running() {
 	jcmd | grep -q "kafka.Kafka"
+}
+
+# @description Imprime el menú de ayuda con la descripción detallada de los comandos.
+broker::help() {
+  cat << 'EOF'
+Broker (Gestión del nodo Kafka):
+    Uso: ./kafve broker <acción> [opciones]
+
+    Acciones:
+        init [-f]       Inicializa el almacenamiento y genera el Cluster ID (KRaft).
+        start           Levanta el broker en modo daemon (fondo).
+        stop            Detiene el proceso de forma segura (Graceful shutdown).
+        status          Muestra una tabla con los procesos y PIDs activos.
+        logs            Muestra los logs del servidor en tiempo real (tail -f).
+        help, -h        Muestra este panel de asistencia técnica.
+
+    Descripción de Acciones:
+        init    Prepara los directorios de datos. Si no se especifica el ID,
+                genera uno aleatorio. Requiere "server.properties".
+        start   Inicia el proceso. Si detecta que no hay metadatos de KRaft,
+                ejecuta un "init" automático antes de arrancar.
+        stop    Envía una señal SIGTERM. Si el proceso no responde tras 3s,
+                escala a una parada forzada para evitar procesos zombis.
+
+    Opciones:
+        -f, --force     En "init": Borra el directorio definido en "log.dirs"
+                        y reformatea el cluster desde cero (Peligro: Borra datos).
+
+    Ejemplos:
+        ./kafve broker init --force
+        ./kafve broker status
+
+EOF
 }
 
 # --- Main run -----------------------------------------------------------

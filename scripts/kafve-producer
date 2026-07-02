@@ -42,6 +42,10 @@ producer::main() {
 			command="send"
 			shift
 			;;
+		help | -h | --help | "")
+			command="help"
+			shift
+			;;
 		-t | --topic)
 			topic="$2"
 			shift 2
@@ -68,8 +72,11 @@ producer::main() {
 	# Delegación de comandos
 	case "$command" in
 	"send")
-		# Se envuelve en un if para controlar el código de salida sin disparar el trap ERR
 		producer::send "${topic}" "${key}" "${message}" "${file_rute}"
+		;;
+	"help")
+		producer::help
+		return 0
 		;;
 	*)
 		logger::custom "SKIP" "/kafve producer <comando> [argumentos]"
@@ -198,6 +205,33 @@ producer::send_message() {
 		--reader-property "key.separator=:" \
 		--producer-property acks=all \
 		<<<"${key}:${message}" >/dev/null 2>&1
+}
+
+# @description Imprime el menú de ayuda con la descripción detallada de los comandos.
+producer::help() {
+	cat <<'EOF'
+Producer (Gestión de publicación de mensajes):
+    Uso: ./kafve producer <acción> [opciones]
+
+    Acciones:
+        send <-t tópico> [-k llave] [-m mensaje | -f archivo]
+        help, -h        Muestra este panel de asistencia técnica.
+
+    Descripción de Acciones:
+        send    Publica un registro en Kafka. Requiere obligatoriamente un tópico
+                y contenido (mensaje directo o vía archivo).
+
+    Opciones:
+        -t, --topic     Nombre del tópico destino (Obligatorio).
+        -m, --message   Cuerpo del mensaje en texto plano.
+        -f, --file      Ruta a un archivo (se envía como un único mensaje).
+        -k, --key       Llave del mensaje (Opcional, defecto: K-RANDOM).
+
+    Ejemplos:
+        ./kafve producer send -t ventas -m "Orden #123"
+        ./kafve producer help
+
+EOF
 }
 
 # --- MAIN RUN -----------------------------------------------------------
