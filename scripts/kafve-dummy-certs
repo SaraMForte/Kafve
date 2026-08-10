@@ -84,7 +84,7 @@ kafve-dummy-certificates::generate() {
         -alias CARoot -import -file "${CERTIFICATE_RUTE}/ca-cert" \
         -storepass ${PASSWORD} -noprompt
 
-    logger::done "Ahora la cadena de confianza es completa."
+    logger::done "Se han generado correctamente los certificados dummy."
 }
 
 kafve-dummy-certificates::help() {
